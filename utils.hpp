@@ -13,11 +13,6 @@
 
 double bs_call(double S0, double K, double T, double r, double sigma);
 
-// Call de Heston por transformada de Fourier. Albrecher et al. (2007)
-double heston_call_cf(double S0, double K, double T, double r,
-                      double kappa, double theta, double xi,
-                      double rho, double v0);
-
 // Precio analítico (sin descuento) de la Asian geométrica discreta bajo GBM
 double geom_asian_analytic(double S0, double K, double T, double mu,
                            double sigma, int n_steps);

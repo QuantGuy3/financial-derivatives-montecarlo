@@ -14,7 +14,12 @@ struct MCConfig {
 };
 
 struct QMCConfig {
-    int R            = 32; // Réplicas Sobol con scrambling distinto
+    // Réplicas Sobol: bloques disjuntos consecutivos de UNA misma secuencia scrambled
+    // (mismo scrambling en todas, distinto carril de offset), no randomizaciones
+    // independientes entre sí. var_of_means entre réplicas es una aproximación
+    // práctica del error, no el estimador insesgado de un RQMC con shifts propios
+    // por réplica.
+    int R            = 32;
     int max_doublings = 20; // Máximo de duplicaciones del número de puntos
 };
 

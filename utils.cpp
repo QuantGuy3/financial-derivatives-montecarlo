@@ -1,6 +1,5 @@
 #include "utils.hpp"
 #include <cmath>
-#include <complex>
 #include <stdexcept>
 #include <algorithm>
 #include <functional>
@@ -8,7 +7,6 @@
 #include <iostream>
 #include <sstream>
 #include <cassert>
-#include <numbers>
 #include <print>
 #include <Eigen/Eigenvalues>
 
@@ -28,56 +26,6 @@ double bs_call(double S0, double K, double T, double r, double sigma) {
     double d2 = d1 - sigma * sqrtT;
     return S0 * norm_cdf(d1) - K * std::exp(-r * T) * norm_cdf(d2);
 }
-
-// ----------- //
-// Call Heston //
-// ----------- //
-
-// Precio de una call en Heston por transformada de Fourier (cuadratura con N=512 puntos).
-// Albrecher, Mayer, Schachermayer & Teichmann (2007)
-
-double heston_call_cf(double S0, double K, double T, double r,
-                      double kappa, double theta, double xi,
-                      double rho, double v0) {
-    using cd = std::complex<double>;
-    const double pi = std::numbers::pi;
-
-    // Función característica de log(S_T) bajo la medida Q_j
-    auto char_fn = [&](cd u, int j) -> cd {
-        cd i(0, 1);
-        double b  = (j == 1) ? kappa - rho * xi : kappa;
-        cd sigma2 = xi * xi;
-        cd d = std::sqrt((rho * xi * i * u - b) * (rho * xi * i * u - b)
-                         + sigma2 * (i * u + u * u));
-        cd g = (b - rho * xi * i * u + d) / (b - rho * xi * i * u - d);
-        cd C = r * i * u * T
-               + (kappa * theta / sigma2)
-               * ((b - rho * xi * i * u + d) * T
-                  - 2.0 * std::log((1.0 - g * std::exp(d * T)) / (1.0 - g)));
-        cd D = (b - rho * xi * i * u + d) / sigma2
-               * (1.0 - std::exp(d * T)) / (1.0 - g * std::exp(d * T));
-        return std::exp(C + D * v0 + i * u * std::log(S0));
-    };
-
-    // P_j = 0.5 + (1/π) · Re[ ∫₀^∞ e^{-iu·log(K)} · φ_j(u) / (iu) du ]
-    const int    N  = 512;
-    const double du = 0.05;
-    auto integral = [&](int j) {
-        double sum = 0.0;
-        for (int k = 1; k <= N; k++) {
-            double u = (k - 0.5) * du;
-            cd iu(0, u);
-            cd phi = char_fn(u - (j == 1 ? cd(0, 1) : 0.0), j);
-            sum += (std::exp(-iu * std::log(K)) * phi / iu).real() * du;
-        }
-        return 0.5 + sum / pi;
-    };
-
-    double P1 = integral(1);
-    double P2 = integral(2);
-    return S0 * P1 - K * std::exp(-r * T) * P2;
-}
-
 
 // ---------------------------------------------------------------- //
 // Fórmula analítica de la Asian geométrica bajo GBM sin descuento  //

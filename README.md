@@ -1,40 +1,35 @@
-# Valoración de Derivados Financieros con Monte Carlo (C++/CUDA)
+# Financial Derivatives Monte Carlo (GPU / CUDA)
 
-Librería en C++ y CUDA para valorar derivados financieros mediante simulación de Monte Carlo, con soporte para múltiples modelos estocásticos, técnicas de reducción de varianza y aceleración en GPU.
+Motor de valoración de derivados financieros en C++/CUDA, pensado para GPUs NVIDIA (objetivo `sm_80`, A100) con `cuRAND`, `cuBLAS` y `CUB`. Implementa cuatro familias de estimadores — Monte Carlo estándar (MC), Quasi-Monte Carlo (QMC), Multilevel Monte Carlo (MLMC) y Multilevel Quasi-Monte Carlo (MLQMC) — sobre varios modelos de precio (GBM, Heston, Dupire local, cestas multi-activo) y varios payoffs (europeas, asiáticas, lookback, barrera, basket), con soporte de reducción de varianza (variables de control, importance sampling) y de técnicas de reducción de dimensión efectiva (Brownian Bridge, PCA con Tensor Cores).
 
-## Derivados implementados
+## Los cuatro métodos
 
-Diez ejemplos que cubren una amplia gama de productos:
+**Monte Carlo (MC).** Cada trayectoria se simula con un esquema de Euler (Euler–Milstein en la varianza para Heston) a partir de incrementos brownianos generados con `cuRAND` (generador pseudoaleatorio XORWOW). Un piloto inicial estima la varianza de la muestra y, a partir de ella, el número de trayectorias necesario para alcanzar la tolerancia `eps` objetivo (regla `N = 2·Var/eps²`); el resto de trayectorias se generan y evalúan en lotes (`N_batch`) dimensionados dinámicamente según la memoria libre de la GPU.
 
-| Ejemplo | Derivado | Técnica |
-|---------|----------|---------|
-| 01 | Opción europea (Call/Put) | MC estándar |
-| 02 | Opción asiática (media aritmética) | MC estándar |
-| 03 | Opción lookback | MC estándar |
-| 04 | Opción barrera | MC estándar |
-| 05 | Opción sobre Heston | Modelo de volatilidad estocástica |
-| 06 | Opción sobre Dupire | Volatilidad local |
-| 07 | Cesta no correlacionada | MC multidimensional |
-| 08 | Cesta correlacionada | Cholesky + MC |
-| 09 | Asiática con variable de control | Reducción de varianza |
-| 10 | Dupire con variable de control | Reducción de varianza |
-| 11 | OTM con muestreo por importancia | Reducción de varianza |
+**Quasi-Monte Carlo (QMC).** Sustituye el ruido pseudoaleatorio por una secuencia de Sobol *scrambled* de `cuRAND` (`CURAND_RNG_QUASI_SCRAMBLED_SOBOL32`), que cubre el hipercubo `[0,1]^D` con mejor discrepancia que puntos i.i.d. y por tanto converge más rápido en integrandos suaves. El error no se puede estimar con la varianza muestral clásica (los puntos no son independientes), así que se usan `R` réplicas: bloques disjuntos consecutivos de la misma secuencia *scrambled*, cada una con su propio "carril" de offset (`QMC_LANE = 2²²`) que nunca colisiona con el de otra réplica ni consigo mismo al doblar el número de puntos. La media de las `R` réplicas es el estimador del precio, y la varianza entre réplicas (`var_of_means`) es la aproximación práctica de su error — no el estimador insesgado de un RQMC con *shifts* propios por réplica, pero sí un indicador utilizable de convergencia. El bucle dobla progresivamente el número de puntos por réplica hasta que `var_of_means < eps²/2` o se alcanza `max_doublings`. El ruido Sobol puede además pasar por dos transformaciones antes del esquema de Euler: **Brownian Bridge** (construye la trayectoria de "grueso a fino", concentrando la varianza explicada en las primeras coordenadas Sobol, que son las de menor discrepancia) o **PCA** (proyección sobre las componentes principales de la matriz de covarianzas del movimiento browniano, aplicada como un único producto matricial por lote vía `cuBLAS` con Tensor Cores en `fp16→fp32`).
 
-## Técnicas de reducción de varianza y estimación
+**Multilevel Monte Carlo (MLMC).** Sigue el esquema de Giles (2008): en vez de simular todo con paso fino `h`, se estima el precio como una suma telescópica `E[Y] = Σ_l E[P_l − P_{l−1}]` sobre niveles `l = 0..L` con pasos `h_l = T/M^l` (`M` = factor de refinamiento). Cada nivel `l>0` simula **una misma trayectoria** con dos discretizaciones acopladas (fina y gruesa, compartiendo el mismo ruido browniano) para que `Var[P_l − P_{l−1}] → 0` cuando `h_l → 0`; el nivel grueso reconstruye su incremento sumando los pasos finos entre dos puntos gruesos, así que ambos ven exactamente el mismo camino browniano. Un piloto por nivel estima `V_l`, y la asignación óptima de trayectorias por nivel (`N_l ∝ sqrt(V_l/coste_l) · Σ sqrt(V_l·coste_l)`) minimiza la varianza total a coste fijo. El número de niveles `L` crece adaptativamente hasta que el sesgo estimado (extrapolado de `E_L`, `E_{L-1}`) cae por debajo de `eps/√2`.
 
-- **MLMC** (Multilevel Monte Carlo) con refinamiento adaptativo de niveles
-- **MLQMC** (Multilevel Quasi-Monte Carlo) con secuencias de Sobol y scrambling
-- **Variables de control** y **muestreo por importancia**
-- **Brownian Bridge** y **PCA** como modos de transformación del ruido
+**Multilevel Quasi-Monte Carlo (MLQMC).** Combina ambos: en cada nivel, en vez de trayectorias MC acopladas, se generan `R` réplicas Sobol *scrambled* (mismo esquema de carriles que en QMC, pero ahora indexado por `(nivel, réplica)` para que ni los niveles ni las réplicas de un mismo nivel colisionen entre sí al crecer). El estimador de cada diferencia de nivel usa la media de las réplicas, y la telescópica final es la misma suma `Σ_l E[P_l−P_{l−1}]` de MLMC, pero con varianza por nivel reducida gracias a la baja discrepancia de Sobol.
 
-## Arquitectura
+## Streams de CUDA y paralelismo entre niveles
 
-- Simulación en GPU con CUDA (`methods_cuda.cu`) mediante lotes de trayectorias configurables
-- Generación de informes automáticos (`gen_informe.py`)
-- Barridos de precisión y comparativas entre métodos
+Un *stream* de CUDA es una cola ordenada de trabajo (kernels, copias, llamadas a `cuRAND`/`cuBLAS`) que la GPU ejecuta de forma asíncrona respecto a la CPU, en el orden en que se encola. `run_mlmc_cuda` y `run_mlqmc_cuda` crean un stream *non-blocking* por nivel (`cudaStreamCreateWithFlags(..., cudaStreamNonBlocking)`), cada uno con su propio generador de `cuRAND` (o, en MLQMC, su propio `cublasHandle_t` si se usa PCA) y sus propios buffers de dispositivo. Al lanzar todos los niveles antes de sincronizar ninguno (`launch_level(l, ...)` para cada `l` seguido de `collect_level(l)` para cada `l`), los kernels de niveles distintos pueden solaparse de verdad en la GPU en vez de ejecutarse uno tras otro — el nivel `l=0` (barato, muchas trayectorias) puede seguir corriendo mientras el nivel `l=L` (caro, pocas trayectorias) ya ha terminado, aprovechando mejor los *streaming multiprocessors* de la tarjeta. Dentro de un mismo nivel, sucesivas llamadas a `launch_level` (piloto, refinamientos, extensión de `L`) reutilizan el mismo stream y el mismo generador, así que el orden interno queda garantizado por la propia cola del stream sin necesitar sincronizaciones explícitas adicionales.
 
-## Tecnologías
+## Kernels, acumuladores y reducción
 
-- C++17 / CUDA
-- CMake
-- Python (análisis de resultados)
+Cada trayectoria se asigna a un hilo CUDA (`p = blockIdx.x*BLOCK_SIZE + threadIdx.x`, `BLOCK_SIZE=256`); los hilos sobrantes del último bloque quedan protegidos por un `if (p < N_paths)` que los deja aportar exactamente `0` a la suma en vez de contaminarla (una guarda que se repite explícitamente en los kernels de variable de control, donde un descuido dejaría un sesgo `beta·E_ctrl` en el estimador). El acumulador *running* del payoff (suma para asiáticas, mínimo para lookback, máximo para barrera) se actualiza en un registro local del hilo tras cada paso de Euler mediante `d_running_update<PayoffKind>`, especializado en tiempo de compilación con `if constexpr` para no pagar el coste de una rama en tiempo de ejecución. Al terminar la trayectoria, cada hilo reduce su valor (`Y`, `Y²`, y en MLMC también `ΔY`, `ΔY²`) dentro del bloque con `cub::BlockReduce` (reducción en memoria compartida, sin comunicación entre bloques), y solo el hilo `0` de cada bloque hace un `atomicAdd` sobre el acumulador global en memoria del dispositivo (`d_sums`). Esto reduce el número de operaciones atómicas de "una por hilo" a "una por bloque" (256×), evitando que la contención en `atomicAdd` sea el cuello de botella, y evita cualquier condición de carrera entre bloques porque cada uno solo escribe una vez, de forma atómica, sobre una posición ya inicializada a cero (`cudaMemset`/`cudaMemsetAsync` antes del lanzamiento).
+
+## Evitación de condiciones de carrera
+
+Además de las guardas `p < N_paths` y de la reducción por bloque descrita arriba, el código evita carreras en varios niveles: (1) los parámetros del kernel (`KernelParams c_p`) viven en memoria `__constant__`, de solo lectura durante el kernel, y se fijan una única vez por llamada con `cudaMemcpyToSymbol` antes de lanzar ningún nivel — en MLMC/MLQMC `c_p` no depende del nivel `l` precisamente para poder lanzar todos los niveles en paralelo sin que uno sobrescriba los parámetros que otro está leyendo; (2) cada nivel en MLMC/MLQMC tiene su propio buffer de ruido (`d_Z`), su propio generador de `cuRAND` y su propio acumulador `d_sums`, así que streams distintos nunca comparten memoria de escritura; (3) dentro de un mismo stream, el orden FIFO garantiza que la generación de un nuevo lote de ruido en `d_Z` espera a que el kernel anterior haya terminado de leerlo antes de sobreescribirlo, sin necesitar un lock explícito; (4) en QMC/MLQMC, cada réplica (y en MLQMC cada par nivel-réplica) tiene reservado un carril disjunto de offsets Sobol (`r*QMC_LANE`, o por nivel también), con comprobaciones explícitas que lanzan una excepción si un doblado de puntos amenaza con desbordar su carril y colisionar con el de otra réplica; (5) el producto de Cholesky para cestas correlacionadas y la proyección PCA se hacen como una única llamada por lotes a `cuBLAS` (`cublasSgemmStridedBatched` / `cublasGemmEx`) en vez de dentro del kernel de payoff, evitando que cada hilo tenga que releer memoria global de forma no coalescente o mantener `n_assets` acumuladores locales.
+
+## Estructura del repositorio
+
+- `models.hpp` / `payoffs.hpp`: parámetros de los modelos de precio (GBM, Heston, Dupire local, cesta Dupire multi-activo) y de los payoffs (europea, asiática aritmética/geométrica, lookback, barrera, basket), como `std::variant`.
+- `utils.hpp` / `utils.cpp`: fórmulas analíticas de referencia, precómputo de Brownian Bridge y PCA en CPU (Eigen), estimación del sesgo por Richardson, acumuladores *running* (`RunningStats`, media/varianza en un solo paso) y tablas de resultados.
+- `methods_cuda.cuh` / `methods_cuda.cu`: implementación GPU de los cuatro métodos (`run_mc_cuda`, `run_qmc_cuda`, `run_mlmc_cuda`, `run_mlqmc_cuda`), variables de control y importance sampling.
+- `examples/`: 11 ejemplos ejecutables (`ejemplo01`…`ejemplo11`) que cubren europea, asiática, lookback, barrera, Heston, Dupire, cestas correlacionadas/no correlacionadas, variables de control e importance sampling.
+- `colab_build.sh`: script de compilación pensado para un entorno Google Colab con GPU.
+- `informes_finales/`: informes de resultados numéricos generados sobre los ejemplos anteriores.
+- `gen_informe.py` / `gen_informe_completo.py`: generación automática de esos informes a partir de las salidas de los ejemplos.
