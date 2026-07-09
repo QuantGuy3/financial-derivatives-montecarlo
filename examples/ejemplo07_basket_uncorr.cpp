@@ -53,14 +53,11 @@ int main(int argc, char** argv) {
         rows.push_back({name, r.price, r.std_error, r.n_samples, r.time_s});
     };
 
+    // MLMC/MLQMC no soportan MultiDupire (cestas): no hay kernel MLMC multi-activo.
     add("MC",
         run_mc_cuda(mv, pv, eps, n_steps, mc_cfg));
-    add("MLMC",
-        run_mlmc_cuda(mv, pv, eps, ml_cfg));
     add("QMC Raw",
         run_qmc_cuda(mv, pv, eps, n_steps, qmc_cfg, NoiseMode::Raw));
-    add("MLQMC Raw",
-        run_mlqmc_cuda(mv, pv, eps, ml_cfg, qmc_cfg, NoiseMode::Raw));
 
     // ── Tabla ─────────────────────────────────────────────────────────────────
     print_table(rows, price_ref, eps,
