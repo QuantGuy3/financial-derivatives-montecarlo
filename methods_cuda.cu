@@ -5,6 +5,7 @@
 #include <cuda_runtime.h>
 #include <cuda_fp16.h>
 #include <curand.h>
+#include <curand_kernel.h>
 #include <cublas_v2.h>
 #include <cub/cub.cuh>
 
@@ -129,9 +130,28 @@
 //
 //                                 Rellena un array de la GPU con n números N(mu,sigma).
 //
-//  curandDestroyGenerator(gen)    
-// 
+//  curandDestroyGenerator(gen)
+//
 //                                  Libera los recursos asociados al generador.
+//
+//  curandGetDirectionVectors32(&ptr, set)
+//
+//                                 Devuelve, en memoria de host, la tabla de vectores
+//                                 directores de Sobol (Joe-Kuo 2008) SIN escramblear,
+//                                 usada para generar con la API de dispositivo en vez
+//                                 de la de host y aplicar un scrambling propio por
+//                                 réplica (ver kernel_gen_hh_scrambled_sobol_normal más
+//                                 abajo: matrices triangulares de Hong-Hickernell en vez
+//                                 del scramble_c fijo/opaco de CURAND_RNG_QUASI_-
+//                                 SCRAMBLED_SOBOL32).
+//
+//  curand_init(direction_vectors, offset, &state) / curand(&state)
+//
+//                                 Versión de dispositivo (una llamada por hilo) del
+//                                 generador Sobol SIN escramblear: curand_init fija la
+//                                 posición dentro de la secuencia y curand() devuelve el
+//                                 entero de 32 bits crudo (el vector de dígitos), sin
+//                                 pasar por ninguna transformación de distribución.
 //
 //  cublasCreate(&handle) / cublasDestroy(handle)
 //
@@ -227,12 +247,12 @@ __constant__ KernelParams c_p;
 
 static constexpr int BLOCK_SIZE = 256;
 
-// Carril de offsets de Sobol reservado por (réplica) en run_qmc_cuda/run_qmc_cv_cuda,
-// o por (nivel, réplica) en run_mlqmc_cuda: cada carril arranca en índice*QMC_LANE y
-// avanza monótonamente dentro de sí mismo, de modo que nunca colisiona con otro
-// carril ni consigo mismo al crecer N (doblados QMC, refinamientos MLQMC, o niveles
-// MLQMC distintos que reusarían el mismo r si solo se indexara por réplica).
-static constexpr unsigned long long QMC_LANE = 1ULL << 22;
+// Redondea x a la potencia de 2 más cercana por abajo (x>=1).
+static long long pow2_floor(long long x) {
+    long long p = 1;
+    while (p * 2 <= x) p *= 2;
+    return p;
+}
 
 // Memoria libre de la GPU ahora mismo, con cierto margen de seguridad.
 static long long gpu_free_bytes() {
@@ -704,6 +724,126 @@ __global__ void kernel_cast_f32_to_f16(const float* src, __half* dst, int n) {
 }
 
 
+// ---------------------------------------------------------------------------- //
+// Generación scrambled-Sobol con matrices triangulares de Hong-Hickernell,     //
+// scrambling independiente por réplica (observación 3.19 / §2.4 de la memoria) //
+//                                                                              //
+// La implementación nativa de CUDA del scrambling de Owen nos ha resultado     //
+// insuficiente. Por ello, en vez de apoyarse en el scrambling interno de       //
+// cuRAND, aquí se genera                                                       // 
+// el Sobol sin scrambling (API de dispositivo, curandStateSobol32_t) y se      //
+// aplica a mano, por réplica y dimensión, una matriz triangular inferior       //
+// aleatoria invertible sobre F_2 más un desplazamiento digital aditivo —       //
+// exactamente la construcción del teorema 2.20 (Hong-Hickernell, alg. 823 de   //
+// ACM): preserva la estructura de red-(t,m,s) y cuesta O(M) operaciones sobre  //
+// F_2 por dimensión y punto (M=32 bits). Además, lo implementamos con __popc   //
+// para que                                                                     //
+// cada producto fila·vector sobre F_2 sea una única instrucción de hardware.   //
+//                                                                              //
+// La matriz L y el desplazamiento e de la réplica r en la dimensión dim no se  //
+// almacenan. En su lugar, se deriva en el momento, en cada hilo, a partir de   //
+// (replica_salt,                                                               //
+// dim, fila) mediante el mezclador splitmix32. Esto evita reservar y llenar    //
+// una tabla de matrices por (réplica, dimensión), potencialmente varios GB    //
+// para R y D grandes, a cambio de recomputar unos 32 hashes de 32 bits por     //
+// punto, argumentamos que es un coste marginal frente al resto de cálculos     // 
+// ---------------------------------------------------------------------------- //
+
+// Función hash "slitmix32"
+__host__ __device__ __forceinline__ unsigned int splitmix32(unsigned int x) {
+    x += 0x9E3779B9u;
+    x = (x ^ (x >> 16)) * 0x21F0AAADu;
+    x = (x ^ (x >> 15)) * 0x735A2D97u;
+    x = x ^ (x >> 15);
+    return x;
+}
+
+// Vectores directores de Sobol sin scrambling (Joe-Kuo 2008), subidos una
+// única vez a memoria de dispositivo la primera vez que se necesitan y
+// reutilizados el resto de la ejecución.
+static curandDirectionVectors32_t* g_d_sobol_dirvectors = nullptr;
+
+static void ensure_sobol_dirvectors_uploaded() {
+    if (g_d_sobol_dirvectors) return; // ya subidas en una llamada anterior
+    curandDirectionVectors32_t* h_dirvectors = nullptr;
+    CURAND_CHECK(curandGetDirectionVectors32(&h_dirvectors,
+        CURAND_DIRECTION_VECTORS_32_JOEKUO6));
+    CUDA_CHECK(cudaMalloc(&g_d_sobol_dirvectors,
+        (size_t)D_MAX_SOBOL * sizeof(curandDirectionVectors32_t)));
+    CUDA_CHECK(cudaMemcpy(g_d_sobol_dirvectors, h_dirvectors,
+        (size_t)D_MAX_SOBOL * sizeof(curandDirectionVectors32_t), cudaMemcpyHostToDevice));
+}
+
+// Hace scrambling a cada punto de Sobol aplicándole una matriz triangular inferior aleatoria 
+// sobre F_2 (diagonal en 1 para garantizar que sea invertible, preservando así la 
+// estructura de red del Sobol) más un desplazamiento digital adicional (teorema 2.20 
+// (Hong-Hickernell, alg. 823 de ACM))
+__device__ __forceinline__ unsigned int hh_scramble(unsigned int raw, unsigned int base) {
+    unsigned int scrambled = 0;
+    #pragma unroll
+    for (int k = 0; k < 32; k++) {
+        // fila por fila hace:
+        unsigned int row_seed = splitmix32(base ^ (unsigned int)k); // Genera 0 o 1 pseudoaleatoriamente
+        unsigned int diag_bit = 1u << (31 - k); // 1 en diagonal
+        unsigned int top_mask = (k == 0) ? 0u : (0xFFFFFFFFu << (32 - k)); // Para que sea triang inferior
+        unsigned int row = diag_bit | (row_seed & top_mask); // Fila final.
+        unsigned int bit = __popc(row & raw) & 1u; // Producto escalar en F_2 reducida a ser O(1) (contar número de 1s)
+        scrambled |= (bit << (31 - k)); // Coloca el bit en su posición
+    }
+    unsigned int shift = splitmix32(base ^ 0xA5A5A5A5u); // Desplazamiento
+    return scrambled ^ shift; // Se aplica el desplazamiento
+}
+
+// Genera D*chunk normales N(0,1) de una secuencia de Sobol habiéndole hecho scrambling
+// con matrices de Hong-Hickernell.
+__global__ void kernel_gen_hh_scrambled_sobol_normal(
+    const curandDirectionVectors32_t* __restrict__ dirvectors,
+    unsigned int replica_salt,
+    unsigned int offset,
+    float* __restrict__ out,
+    long long total, int chunk)
+{
+    long long idx = (long long)blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= total) return;
+    int dim = (int)(idx / chunk);
+    int p   = (int)(idx - (long long)dim * chunk);
+
+    // Punto de Sobol (sin scrambling) en esta dimensión y posición.
+    unsigned int dv[32];
+    #pragma unroll
+    for (int i = 0; i < 32; i++) dv[i] = dirvectors[dim].v[i];
+    curandStateSobol32_t state;
+    curand_init(dv, offset + (unsigned int)p, &state);
+    unsigned int raw = curand(&state);
+
+    unsigned int base = splitmix32(replica_salt) ^ (unsigned int)dim;
+    unsigned int scrambled = hh_scramble(raw, base);
+
+    // Uniforme en (0,1].
+    float u = ((float)scrambled + 1.0f) * (1.0f / 4294967296.0f);
+    out[idx] = normcdfinvf(u);
+}
+
+// Kernel para generar normales sobol. Número de la secuencia 'offser64' con scrambling
+// 'replica_salt'.
+static void gen_scrambled_sobol_normal_replica(
+    float* d_out, long long D, long long chunk, unsigned long long offset64,
+    unsigned int replica_salt, cudaStream_t stream = 0)
+{
+    ensure_sobol_dirvectors_uploaded();
+    if (offset64 > (unsigned long long)UINT_MAX)
+        throw std::runtime_error("gen_scrambled_sobol_normal_replica: offset "
+            + std::to_string(offset64) + " excede el límite de 32 bits de curand_init "
+            + "(API de dispositivo); reduzca N o max_doublings.");
+    long long total = D * chunk;
+    int blk = (int)((total + BLOCK_SIZE - 1) / BLOCK_SIZE);
+    kernel_gen_hh_scrambled_sobol_normal<<<blk, BLOCK_SIZE, 0, stream>>>(
+        g_d_sobol_dirvectors, replica_salt,
+        (unsigned int)offset64, d_out, total, (int)chunk);
+    CUDA_CHECK(cudaGetLastError());
+}
+
+
 // ------------------------------------------- //
 // Tablas [modelo × payoff]                    //
 // ------------------------------------------- //
@@ -985,21 +1125,17 @@ static void multi_free(DeviceMultiData& d) {
     d.d_S0 = d.d_L = nullptr;
 }
 
-// Correlaciona in-place-lógico (dW_in -> dW_out) las N_steps matrices de incrementos
+// Correlaciona (dW_in -> dW_out) las N_steps matrices de incrementos
 // [n_assets × N_paths] (fila principal) vía Cholesky: dW_out_k = L · dW_in_k para cada
-// paso k. Se hace como UN solo cublasSgemmStridedBatched (batch=N_steps) en vez de
+// paso k. Se hace de una sola vez (batch=N_steps) en vez de
 // dentro del kernel de payoff, porque cada hilo necesitaría releer memoria global
-// n_assets veces por paso (no coalescente) o guardar n_assets acumuladores locales
-// (inviable para cestas grandes).
+// n_assets veces por paso (no coalescente) o guardar n_assets acumuladores locales.
 static void correlate_multi_dupire(cublasHandle_t cublas, const DeviceMultiData& dm,
                                    const float* d_dW_in, float* d_dW_out,
                                    int n_steps, int n_paths) {
     const float one = 1.0f, zero = 0.0f;
     long long stride = (long long)dm.n * n_paths;
-    // dm.d_L guarda L fila-principal (n_assets×n_assets); visto por cuBLAS
-    // (columna-principal, ldb=dm.n) esa memoria ES YA L^T. Con OP_N (sin transponer
-    // otra vez) el operando efectivo es exactamente L^T, y (L·dW_p)^T = dW_p^T·L^T,
-    // que es justo lo que da este GEMM en columna-principal para cada paso.
+    // dm.d_L guarda L fila-principal (n_assets×n_assets)
     CUBLAS_CHECK(cublasSgemmStridedBatched(cublas,
         CUBLAS_OP_N, CUBLAS_OP_N,
         n_paths, dm.n, dm.n,
@@ -1016,11 +1152,7 @@ static void phase1_pca(cublasHandle_t cublas,
                        const __half* d_M_pca, const __half* d_Z_f16,
                        float* d_dW_f32, int D, int N) {
     const float alpha = 1.0f, beta = 0.0f;
-    // OP_T en B (no OP_N): la fórmula pretendida es dW = Z·M_pca^T (ver utils.hpp:50),
-    // pero d_M_pca sube en layout column-major desde Eigen (utils.cpp:159-160) tal
-    // cual, sin transponer; sin OP_T aquí se multiplicaba por M_pca sin transponer,
-    // perdiendo el orden de las componentes principales (el resultado seguía siendo
-    // una rotación válida en distribución, pero no la de máxima varianza primero).
+    // La fórmula es dW = Z·M_pca^T
     CUBLAS_CHECK(cublasGemmEx(cublas,
         CUBLAS_OP_N, CUBLAS_OP_T,
         N, D, D,
@@ -1030,12 +1162,12 @@ static void phase1_pca(cublasHandle_t cublas,
         &beta,
         d_dW_f32, CUDA_R_32F, N,
         CUDA_R_32F,
-        CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+        CUBLAS_GEMM_DEFAULT_TENSOR_OP)); // Traspone la matriz
 }
 
 
 // -------------------------------------------- //
-// run_mc_fixed_impl — bloque constructor interno //
+// run_mc_fixed_impl — constructor interno      //
 // -------------------------------------------- //
 
 static std::pair<double,double> run_mc_fixed_impl(
@@ -1099,8 +1231,7 @@ static std::pair<double,double> run_mc_fixed_impl(
     }
 
     // Cesta correlacionada (MultiDupire, uncorrelated==false): correlaciona los
-    // incrementos por Cholesky ANTES del kernel de payoff. Sin esto cada activo se
-    // simula con ruido independiente pase lo que pase en basket.L.
+    // incrementos por Cholesky antes del kernel de payoff.
     DeviceMultiData dm;
     float* d_dW_corr = nullptr;
     const float* d_S0_multi = nullptr;
@@ -1196,7 +1327,7 @@ MCResult run_mlmc_cuda(const ModelVariant& model, const PayoffVariant& payoff,
     std::vector<double> E_l(max_L+1, 0.0), V_l(max_L+1, 0.0);
     std::vector<long long> N_l(max_L+1, 0);
 
-    // Recursos propios por nivel (stream + generador + buffers), para poder tener
+    // Recursos propios por nivel (stream + generador + memoria), para poder tener
     // varios niveles ejecutándose de verdad en paralelo en la GPU.
     struct LevelJob {
         cudaStream_t stream = nullptr;
@@ -1264,7 +1395,7 @@ MCResult run_mlmc_cuda(const ModelVariant& model, const PayoffVariant& payoff,
     };
 
     // Sincroniza el stream del nivel l, recoge {sum_dY, sum_dY², sum_f, sum_f²} y
-    // libera sus buffers de este lanzamiento, pero el stream y el generador se conservan
+    // libera la memoria de este lanzamiento, pero el stream y el generador se conservan
     // para el siguiente launch_level de ese mismo nivel.
     auto collect_level = [&](int l) -> std::array<double,4> {
         LevelJob& j = jobs[l];
@@ -1377,7 +1508,7 @@ MCResult run_qmc_cuda(const ModelVariant& model, const PayoffVariant& payoff,
     if (mode == NoiseMode::PCA || is_multi) { CUBLAS_CHECK(cublasCreate(&cublas)); }
 
     // Cesta correlacionada: sube S0/L una sola vez para toda la función (no cambian
-    // entre réplicas ni doblados).
+    // entre réplicas ni duplicados).
     DeviceMultiData dm;
     if (is_multi) dm = multi_upload(std::get<MultiDupireParams>(model));
 
@@ -1397,17 +1528,15 @@ MCResult run_qmc_cuda(const ModelVariant& model, const PayoffVariant& payoff,
 
     // Primera réplica ya arranca con tantos puntos como quepan en un lote (en vez de
     // un N pequeño fijo), para aprovechar la GPU desde el primer duplicado. Con Sobol,
-    // topa además con QMC_LANE (el carril de offset por réplica, ver su comentario):
-    // pasarse de ahí dispararía la excepción de colisión de carriles en el primer
-    // duplicado en vez de en uno posterior.
+    // redondeado a potencia de 2 para garantizar las propiedades de las redes-(t,m,s).
     long long N_per_replica = std::max(64LL, chunk_cap);
-    if (use_sobol) N_per_replica = std::min(N_per_replica, (long long)QMC_LANE);
+    if (use_sobol) N_per_replica = pow2_floor(N_per_replica);
 
     // Cada réplica acumula en su propio d_sums a través de los duplicados: al doblar
-    // N_per_replica solo se generan y suman los puntos NUEVOS (rango [N_done[r],
+    // N_per_replica solo se generan y suman los puntos nuevos (rango [N_done[r],
     // N_per_replica)), en vez de tirar el trabajo ya hecho y regenerar todo desde
-    // cero. El offset usa el carril r*QMC_LANE para que la réplica r nunca reutilice
-    // ni colisione con puntos de otra réplica al crecer.
+    // cero. Con Sobol, cada réplica tiene su propio scramble independiente
+    // (gen_scrambled_sobol_normal_replica).
     std::vector<double*> d_sums_r(R, nullptr);
     std::vector<long long> N_done(R, 0);
     for (int r = 0; r < R; r++) {
@@ -1426,19 +1555,21 @@ MCResult run_qmc_cuda(const ModelVariant& model, const PayoffVariant& payoff,
             float* d_Z_r = nullptr;
             CUDA_CHECK(cudaMalloc(&d_Z_r, gen_count * sizeof(float) + 2*sizeof(float)));
 
-            curandGenerator_t gen;
             if (use_sobol) {
-                CURAND_CHECK(curandCreateGenerator(&gen, CURAND_RNG_QUASI_SCRAMBLED_SOBOL32));
-                CURAND_CHECK(curandSetQuasiRandomGeneratorDimensions(gen, (unsigned)D));
-                CURAND_CHECK(curandSetGeneratorOffset(gen,
-                    (unsigned long long)r * QMC_LANE + (unsigned long long)done));
+                // Scramble propio de la réplica r (API de dispositivo): el offset es
+                // simplemente "done" dentro de la secuencia YA independiente de esta
+                // réplica, sin carril.
+                gen_scrambled_sobol_normal_replica(d_Z_r, D, chunk,
+                    (unsigned long long)done,
+                    /*replica_salt=*/42u + (unsigned)r);
             } else {
+                curandGenerator_t gen;
                 CURAND_CHECK(curandCreateGenerator(&gen, CURAND_RNG_PSEUDO_XORWOW));
                 CURAND_CHECK(curandSetPseudoRandomGeneratorSeed(gen, 42u + r));
                 CURAND_CHECK(curandSetGeneratorOffset(gen, (unsigned long long)done * D));
+                CURAND_CHECK(curandGenerateNormal(gen, d_Z_r, gen_count, 0.0f, 1.0f));
+                curandDestroyGenerator(gen);
             }
-            CURAND_CHECK(curandGenerateNormal(gen, d_Z_r, gen_count, 0.0f, 1.0f));
-            curandDestroyGenerator(gen);
 
             float* d_dW_r = nullptr;
             CUDA_CHECK(cudaMalloc(&d_dW_r, D * chunk * sizeof(float)));
@@ -1491,9 +1622,10 @@ MCResult run_qmc_cuda(const ModelVariant& model, const PayoffVariant& payoff,
     };
 
     for (int doublings = 0; doublings < cfg.max_doublings; doublings++) {
-        if (use_sobol && (unsigned long long)N_per_replica > QMC_LANE)
+        // Porque si el número de muestras es excesivamente grande, hay desbordamiento de memoria 
+        if (use_sobol && (unsigned long long)N_per_replica > (unsigned long long)UINT_MAX)
             throw std::runtime_error("run_qmc_cuda: N_per_replica=" + std::to_string(N_per_replica)
-                + " excede QMC_LANE=" + std::to_string(QMC_LANE) + "; los carriles de réplica colisionarían.");
+                + " excede el límite de 32 bits del offset de Sobol.");
 
         // Si el duplicado anterior
         // ya generó de más (ver más abajo), N_done[r] == N_per_replica y no hace nada.
@@ -1520,12 +1652,12 @@ MCResult run_qmc_cuda(const ModelVariant& model, const PayoffVariant& payoff,
         if (var_of_means < eps * eps / 2.0) break;
 
         long long N_next = N_per_replica * 2;
-        bool lane_ok = !use_sobol || (unsigned long long)N_next <= QMC_LANE;
+        bool offset_ok = !use_sobol || (unsigned long long)N_next <= (unsigned long long)UINT_MAX;
         bool fits = (D * std::min(chunk_cap, N_next) * (long long)sizeof(float) * 3) <= gpu_free_bytes();
         // Si aún cabe otro duplicado en la GPU y este todavía no ha convergido (así
         // que el siguiente hace falta seguro), lo genera ya en vez de esperar a la
         // próxima vuelta del bucle.
-        if (doublings + 1 < cfg.max_doublings && lane_ok && fits) {
+        if (doublings + 1 < cfg.max_doublings && offset_ok && fits) {
             for (int r = 0; r < R; r++)
                 accumulate_range(r, N_per_replica, N_next, d_sums_r[r]);
             for (int r = 0; r < R; r++) N_done[r] = N_next;
@@ -1570,12 +1702,9 @@ MCResult run_mlqmc_cuda(const ModelVariant& model, const PayoffVariant& payoff,
     if (mode != NoiseMode::Raw && model_noise_dim(model) != 1)
         throw std::runtime_error("run_mlqmc_cuda: Brownian Bridge/PCA solo soportados "
             "para modelos de un factor de ruido (no Heston).");
-    // No se comprueba aquí el tamaño de bb_list/pca_list contra max_L+1: en la
-    // práctica el bucle adaptativo converge mucho antes de alcanzar max_L (que es
-    // solo una cota de seguridad).
 
     // kernel_mlmc (reutilizado aquí para las diferencias de nivel QMC) recibe
-    // h_fine/h_coarse/M explícitos, no vía c_p: kp no depende del nivel, se fija una
+    // h_fine/h_coarse/M, no vía c_p pues kp no depende del nivel, se fija una
     // sola vez (misma razón que en run_mlmc_cuda: es lo que permite lanzar varios
     // niveles a la vez en streams distintos sin pisarse la variable __constant__).
     KernelParams kp = make_params(model, payoff, 1);
@@ -1588,13 +1717,10 @@ MCResult run_mlqmc_cuda(const ModelVariant& model, const PayoffVariant& payoff,
     std::vector<double> E_l(max_L+1, 0.0), sig2_l(max_L+1, 0.0);
     std::vector<long long> N_l(max_L+1, 0);
 
-    // Contador de offset persistente por (nivel, réplica): cada llamada a
-    // launch_level para el mismo (l, r) —pilot, refinamientos posteriores, nueva
-    // extensión de L— debe consumir un tramo nuevo de la secuencia Sobol de esa
-    // réplica, nunca solapado con tramos ya usados.
+    // Número de muestras generadas por (nivel, réplica).
     std::vector<std::vector<long long>> next_off(max_L+1, std::vector<long long>(R_reps, 0));
 
-    // Recursos propios por nivel: un stream, un buffer de generación reutilizado
+    // Recursos propios por nivel: un stream, un generador reutilizado
     // entre réplicas/lotes de ese nivel, y un acumulador d_sums por réplica. Así los
     // niveles pueden ejecutarse de verdad en paralelo en la GPU (streams distintos),
     // mientras que las R réplicas de un mismo nivel se serializan dentro de su
@@ -1642,7 +1768,7 @@ MCResult run_mlqmc_cuda(const ModelVariant& model, const PayoffVariant& payoff,
 
         // bb_list[l]/pca_list[l] deben existir y estar precalculados exactamente
         // para N_fine pasos de este nivel; si no, kernel_bb_transform/phase1_pca
-        // leerían índices fuera de rango (memoria basura o crash)..
+        // leerían índices fuera de rango (memoria basura o crash).
         if (mode == NoiseMode::BrownianBridge) {
             if (l >= (int)bb_list.size() || !bb_list[l])
                 throw std::runtime_error("run_mlqmc_cuda: falta bb_list[" + std::to_string(l)
@@ -1711,14 +1837,18 @@ MCResult run_mlqmc_cuda(const ModelVariant& model, const PayoffVariant& payoff,
         }
 
         for (int r = 0; r < R_reps; r++) {
-            // Carril indexado por (l, r).
-            unsigned long long lane_idx = (unsigned long long)l * (unsigned long long)R_reps + (unsigned long long)r;
+            // salt_idx identifica (nivel, réplica) de forma única para el scramble
+            // de Hong-Hickernell: niveles y réplicas distintos son estadísticamente
+            // independientes entre sí sin necesitar además carriles de offset
+            // disjuntos (dos (l,r) distintos pueden compartir el mismo offset sin
+            // colisionar, porque hh_scramble los decorrelaciona).
+            unsigned long long salt_idx = (unsigned long long)l * (unsigned long long)R_reps + (unsigned long long)r;
 
-            if (use_sobol && (unsigned long long)(next_off[l][r] + N_per_rep) > QMC_LANE)
+            if (use_sobol && (unsigned long long)(next_off[l][r] + N_per_rep) > (unsigned long long)UINT_MAX)
                 throw std::runtime_error("run_mlqmc_cuda: nivel " + std::to_string(l)
                     + ", réplica " + std::to_string(r) + ": offset "
-                    + std::to_string(next_off[l][r] + N_per_rep) + " excede QMC_LANE="
-                    + std::to_string(QMC_LANE) + "; los carriles colisionarían.");
+                    + std::to_string(next_off[l][r] + N_per_rep)
+                    + " excede el límite de 32 bits del offset de Sobol.");
 
             CUDA_CHECK(cudaMemsetAsync(j.d_sums[r], 0, 4*sizeof(double), j.stream));
 
@@ -1733,28 +1863,27 @@ MCResult run_mlqmc_cuda(const ModelVariant& model, const PayoffVariant& payoff,
                 // Misma lógica que en MLMC:
                 // curandSetStream antes de fijar offset/seed: el kernel de
                 // inicialización del generador se lanza ahí.
-                curandGenerator_t gen;
                 if (use_sobol) {
-                    CURAND_CHECK(curandCreateGenerator(&gen, CURAND_RNG_QUASI_SCRAMBLED_SOBOL32));
-                    CURAND_CHECK(curandSetStream(gen, j.stream));
-                    CURAND_CHECK(curandSetQuasiRandomGeneratorDimensions(gen, (unsigned)D));
-                    CURAND_CHECK(curandSetGeneratorOffset(gen,
-                        lane_idx * QMC_LANE + (unsigned long long)(next_off[l][r] + done)));
+                    // Scramble propio de (nivel, réplica).
+                    gen_scrambled_sobol_normal_replica(j.d_Z, D, batch,
+                        (unsigned long long)(next_off[l][r] + done),
+                        /*replica_salt=*/42u + (unsigned)salt_idx, j.stream);
                 } else {
+                    curandGenerator_t gen;
                     CURAND_CHECK(curandCreateGenerator(&gen, CURAND_RNG_PSEUDO_XORWOW));
                     CURAND_CHECK(curandSetStream(gen, j.stream));
-                    CURAND_CHECK(curandSetPseudoRandomGeneratorSeed(gen, 42u + (unsigned)lane_idx));
+                    CURAND_CHECK(curandSetPseudoRandomGeneratorSeed(gen, 42u + (unsigned)salt_idx));
                     CURAND_CHECK(curandSetGeneratorOffset(gen,
                         (unsigned long long)(next_off[l][r] + done) * D));
+                    CURAND_CHECK(curandGenerateNormal(gen, j.d_Z, gen_count, 0.0f, 1.0f));
+                    curandDestroyGenerator(gen);
                 }
-                CURAND_CHECK(curandGenerateNormal(gen, j.d_Z, gen_count, 0.0f, 1.0f));
-                curandDestroyGenerator(gen);
 
                 // kernel_mlmc espera el incremento ya escalado: en
                 // Raw se escala aquí mismo (igual que run_mlmc_cuda); en BB/PCA la
                 // transformada ya devuelve el incremento real, sin escalado extra
                 // (igual que en run_qmc_cuda).
-                // Heston SIEMPRE recibe Z (escala internamente vía Cholesky,
+                // Heston siempre recibe Z (escala internamente vía Cholesky,
                 // ver kernel_mlmc): escalar aquí también en modo Raw sería un doble
                 // escalado. BB/PCA ya están excluidos para Heston por el guard de
                 // model_noise_dim al principio de la función.
@@ -2054,19 +2183,20 @@ MCResult run_qmc_cv_cuda(const ModelVariant& main_model,
 
     int R = cfg.R;
     // Arranca con tantos puntos como quepan en la GPU (con un mínimo de 512, el
-    // suficiente para estimar varianza inter-réplica), topando con QMC_LANE (el
-    // carril de offset por réplica) para no disparar la excepción de colisión.
+    // suficiente (argumentamos) para estimar varianza inter-réplica), redondeado a potencia de 2
+    // (calidad de red-(t,m,s) completa; los duplicados sucesivos lo mantienen así).
     long long budget_floats = gpu_free_bytes() / (long long)sizeof(float);
     long long N_per_rep = std::max(512LL, budget_floats / std::max((long long)n_steps, 1LL));
-    N_per_rep = std::min(N_per_rep, (long long)QMC_LANE);
+    N_per_rep = pow2_floor(N_per_rep);
     double var_of_means = 1e30, grand_mean = 0.0;
     long long total_N = 0;
     std::vector<double> rmeans(R);
 
     // Igual que en run_qmc_cuda: acumular por réplica entre duplicados generando solo
     // los puntos nuevos (rango [N_done[r], N_per_rep)) en vez de tirar el trabajo ya
-    // hecho y regenerar todo desde cero. Carril fijo r*QMC_LANE + offset monótono
-    // N_done[r] para que la réplica r nunca choque ni reutilice puntos al crecer.
+    // hecho y regenerar todo desde cero. Cada réplica tiene su propio scramble
+    // independiente, así que el offset dentro de su propia secuencia es "done",
+    // sin carril.
     std::vector<double*> d_sums_r(R, nullptr);
     std::vector<long long> N_done(R, 0);
     for (int r = 0; r < R; r++) {
@@ -2075,9 +2205,9 @@ MCResult run_qmc_cv_cuda(const ModelVariant& main_model,
     }
 
     for (int doublings = 0; doublings < cfg.max_doublings; doublings++) {
-        if ((unsigned long long)N_per_rep > QMC_LANE)
+        if ((unsigned long long)N_per_rep > (unsigned long long)UINT_MAX)
             throw std::runtime_error("run_qmc_cv_cuda: N_per_rep=" + std::to_string(N_per_rep)
-                + " excede QMC_LANE=" + std::to_string(QMC_LANE) + "; los carriles de réplica colisionarían.");
+                + " excede el límite de 32 bits del offset de Sobol.");
 
         // Lote tan grande como quepa en la GPU ahora mismo, topado a INT_MAX/2 
         // puntos para que (int)batch y D*batch no
@@ -2102,13 +2232,11 @@ MCResult run_qmc_cv_cuda(const ModelVariant& main_model,
                 float* d_dW = nullptr;
                 CUDA_CHECK(cudaMalloc(&d_dW, gen_count * sizeof(float) + 2*sizeof(float)));
 
-                curandGenerator_t gen;
-                CURAND_CHECK(curandCreateGenerator(&gen, CURAND_RNG_QUASI_SCRAMBLED_SOBOL32));
-                CURAND_CHECK(curandSetQuasiRandomGeneratorDimensions(gen, (unsigned)D));
-                CURAND_CHECK(curandSetGeneratorOffset(gen,
-                    (unsigned long long)r * QMC_LANE + (unsigned long long)(done + done_local)));
-                CURAND_CHECK(curandGenerateNormal(gen, d_dW, gen_count, 0.0f, 1.0f));
-                curandDestroyGenerator(gen);
+                // Scramble propio de la réplica r (API de dispositivo): el offset es
+                // el progreso dentro de la secuencia YA independiente de esta réplica.
+                gen_scrambled_sobol_normal_replica(d_dW, D, batch,
+                    (unsigned long long)(done + done_local),
+                    /*replica_salt=*/42u + (unsigned)r);
 
                 kernel_scale<<<((int)(D*batch)+BLOCK_SIZE-1)/BLOCK_SIZE,BLOCK_SIZE>>>(
                     d_dW, sqrtf(kp.h), D*batch);

@@ -14,11 +14,13 @@ struct MCConfig {
 };
 
 struct QMCConfig {
-    // Réplicas Sobol: bloques disjuntos consecutivos de UNA misma secuencia scrambled
-    // (mismo scrambling en todas, distinto carril de offset), no randomizaciones
-    // independientes entre sí. var_of_means entre réplicas es una aproximación
-    // práctica del error, no el estimador insesgado de un RQMC con shifts propios
-    // por réplica.
+    // Réplicas Sobol: cada una recibe su propia matriz triangular de
+    // Hong-Hickernell (scrambling sobre F_2) y su propio desplazamiento
+    // digital, calculados a mano vía la API de dispositivo de cuRAND (ver
+    // gen_scrambled_sobol_normal_replica/hh_scramble en methods_cuda.cu), no
+    // solo un carril de offset distinto sobre un scramble fijo compartido.
+    // var_of_means entre réplicas es así el estimador insesgado descrito en
+    // la observación 3.19 de la memoria (Owen, 1997).
     int R            = 32;
     int max_doublings = 20; // Máximo de duplicaciones del número de puntos
 };
