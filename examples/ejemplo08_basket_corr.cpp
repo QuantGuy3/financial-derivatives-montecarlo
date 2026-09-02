@@ -3,6 +3,8 @@
 #include <cmath>
 #include <algorithm>
 #include <vector>
+#include <functional>
+#include <string>
 #include <random>
 
 // Cholesky triangular inferior (Banachiewicz) de C PSD (in-place → L)
@@ -16,7 +18,6 @@ static void cholesky(std::vector<double>& L, int n) {
             else
                 L[i * n + j] = (L[j * n + j] > 1e-15) ? s / L[j * n + j] : 0.0;
         }
-        // Zero upper triangle
         for (int j = i + 1; j < n; ++j) L[i * n + j] = 0.0;
     }
 }
@@ -24,19 +25,13 @@ static void cholesky(std::vector<double>& L, int n) {
 int main(int argc, char** argv) {
     // ── Parámetros ───────────────────────────────────────────────────────────
     const int    N_ASSETS = 100;
-    double eps = (argc > 1) ? atof(argv[1]) : 0.05;
-    const int    M    = 2;
-    const int    L_MAX = 10;
-
     // ── Matriz de correlación aleatoria (seed=0): C = A*A^T/n, regularizada ──
     std::mt19937_64 rng(0u);
     std::normal_distribution<double> nd(0.0, 1.0);
 
-    // A[N_ASSETS × N_ASSETS] ~ N(0,1)
     std::vector<double> A(N_ASSETS * N_ASSETS);
     for (auto& v : A) v = nd(rng);
 
-    // C = A * A^T / N_ASSETS  (PSD por construcción)
     std::vector<double> C(N_ASSETS * N_ASSETS, 0.0);
     for (int i = 0; i < N_ASSETS; ++i)
         for (int j = 0; j < N_ASSETS; ++j)
@@ -44,17 +39,14 @@ int main(int argc, char** argv) {
                 C[i * N_ASSETS + j] += A[i * N_ASSETS + k] * A[j * N_ASSETS + k];
     for (auto& v : C) v /= N_ASSETS;
 
-    // Regularizar: sumar 0.01 * I para garantizar PD
     for (int i = 0; i < N_ASSETS; ++i) C[i * N_ASSETS + i] += 0.01;
 
-    // Normalizar a matriz de correlación: rho[i,j] = C[i,j] / sqrt(C[i,i]*C[j,j])
     std::vector<double> diag(N_ASSETS);
     for (int i = 0; i < N_ASSETS; ++i) diag[i] = std::sqrt(C[i * N_ASSETS + i]);
     for (int i = 0; i < N_ASSETS; ++i)
         for (int j = 0; j < N_ASSETS; ++j)
             C[i * N_ASSETS + j] /= (diag[i] * diag[j]);
 
-    // Cholesky L de la matriz de correlación
     std::vector<double> L_chol = C;
     cholesky(L_chol, N_ASSETS);
 
@@ -85,29 +77,35 @@ int main(int argc, char** argv) {
         return run_mc_fixed(mv, pv, ns, np, s).first;
     };
     double c1 = estimar_c1_richardson(sim_fn, basket.T, 4, 10000);
-    int n_steps = std::max(1, (int)std::ceil(std::sqrt(2.0) * basket.T / (eps * c1)));
-    n_steps = std::min(n_steps, N_REF_STEPS);
+
+    auto steps_for_eps = [&](double eps) {
+        int n = std::max(1, (int)std::ceil(std::sqrt(2.0) * basket.T / (eps * c1)));
+        return std::min(n, N_REF_STEPS);
+    };
 
     // ── Configuración ────────────────────────────────────────────────────────
     MCConfig   mc_cfg;
-    MLMCConfig ml_cfg;  ml_cfg.M = M;  ml_cfg.max_L = L_MAX;
     QMCConfig  qmc_cfg;
 
-    // ── Métodos ──────────────────────────────────────────────────────────────
-    std::vector<TableRow> rows;
-    auto add = [&](const char* name, MCResult r) {
-        rows.push_back({name, r.price, r.std_error, r.n_samples, r.time_s});
-    };
+    // ── CORRECCIÓN AL DISEÑO DE TAREA 2: barrido de eps con corte por método ──
+    double eps_finest = (argc > 1) ? atof(argv[1]) : 0.0001;
+    std::vector<double> eps_list = eps_scale_125(eps_finest);
 
     // MLMC/MLQMC no soportan MultiDupire (cestas): no hay kernel MLMC multi-activo.
-    add("MC",
-        run_mc_cuda(mv, pv, eps, n_steps, mc_cfg));
-    add("QMC Raw",
-        run_qmc_cuda(mv, pv, eps, n_steps, qmc_cfg, NoiseMode::Raw));
+    std::vector<SweepMethod> methods;
 
-    // ── Tabla ─────────────────────────────────────────────────────────────────
-    print_table(rows, price_ref, eps,
-                "Ejemplo 08: Basket Dupire Correlated (n=100)");
+    methods.push_back({"MC", [&](unsigned so, double eps) {
+        int ns = steps_for_eps(eps);
+        MCConfig c = mc_cfg; c.seed += so;
+        return run_mc_cuda(mv, pv, eps, ns, c);
+    }});
+    methods.push_back({"QMC Raw", [&](unsigned so, double eps) {
+        int ns = steps_for_eps(eps);
+        QMCConfig c = qmc_cfg; c.seed += so;
+        return run_qmc_cuda(mv, pv, eps, ns, c, NoiseMode::Raw);
+    }});
+
+    run_precision_sweep("ejemplo08_basket_corr", methods, price_ref, eps_list);
 
     return 0;
 }

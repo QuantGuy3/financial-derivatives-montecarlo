@@ -3,14 +3,12 @@
 #include <cmath>
 #include <algorithm>
 #include <vector>
+#include <functional>
+#include <string>
 
 int main(int argc, char** argv) {
     // ── Parámetros ───────────────────────────────────────────────────────────
     const int    N_ASSETS = 1000;
-    double eps = (argc > 1) ? atof(argv[1]) : 0.01;
-    const int    M    = 2;
-    const int    L_MAX = 10;
-
     MultiDupireParams basket;
     basket.n           = N_ASSETS;
     basket.mu          = 0.05;
@@ -38,30 +36,38 @@ int main(int argc, char** argv) {
         return run_mc_fixed(mv, pv, ns, np, s).first;
     };
     double c1 = estimar_c1_richardson(sim_fn, basket.T, 4, 5000);
-    int n_steps = std::max(1, (int)std::ceil(std::sqrt(2.0) * basket.T / (eps * c1)));
-    n_steps = std::min(n_steps, N_REF_STEPS);          // limitado por dimensión Sobol
 
-    // ── Configuración ────────────────────────────────────────────────────────
-    // Cesta grande: se usa modo Raw para todas las variantes QMC
-    MCConfig   mc_cfg;
-    MLMCConfig ml_cfg;  ml_cfg.M = M;  ml_cfg.max_L = L_MAX;
-    QMCConfig  qmc_cfg;
-
-    // ── Métodos ──────────────────────────────────────────────────────────────
-    std::vector<TableRow> rows;
-    auto add = [&](const char* name, MCResult r) {
-        rows.push_back({name, r.price, r.std_error, r.n_samples, r.time_s});
+    // n_steps limitado por la dimensión de Sobol (n_assets * n_steps <= D_MAX_SOBOL):
+    // no se usa next_pow2 aqui, a diferencia de los ejemplos GBM de un activo.
+    auto steps_for_eps = [&](double eps) {
+        int n = std::max(1, (int)std::ceil(std::sqrt(2.0) * basket.T / (eps * c1)));
+        return std::min(n, N_REF_STEPS);
     };
 
-    // MLMC/MLQMC no soportan MultiDupire (cestas): no hay kernel MLMC multi-activo.
-    add("MC",
-        run_mc_cuda(mv, pv, eps, n_steps, mc_cfg));
-    add("QMC Raw",
-        run_qmc_cuda(mv, pv, eps, n_steps, qmc_cfg, NoiseMode::Raw));
+    // ── Configuración ────────────────────────────────────────────────────────
+    // Cesta grande: se usa modo Raw para todas las variantes QMC. MLMC/MLQMC
+    // no soportan MultiDupire (cestas): no hay kernel MLMC multi-activo.
+    MCConfig   mc_cfg;
+    QMCConfig  qmc_cfg;
 
-    // ── Tabla ─────────────────────────────────────────────────────────────────
-    print_table(rows, price_ref, eps,
-                "Ejemplo 07: Basket Dupire Uncorrelated (n=1000)");
+    // ── CORRECCIÓN AL DISEÑO DE TAREA 2: barrido de eps con corte por método ──
+    double eps_finest = (argc > 1) ? atof(argv[1]) : 0.0001;
+    std::vector<double> eps_list = eps_scale_125(eps_finest);
+
+    std::vector<SweepMethod> methods;
+
+    methods.push_back({"MC", [&](unsigned so, double eps) {
+        int ns = steps_for_eps(eps);
+        MCConfig c = mc_cfg; c.seed += so;
+        return run_mc_cuda(mv, pv, eps, ns, c);
+    }});
+    methods.push_back({"QMC Raw", [&](unsigned so, double eps) {
+        int ns = steps_for_eps(eps);
+        QMCConfig c = qmc_cfg; c.seed += so;
+        return run_qmc_cuda(mv, pv, eps, ns, c, NoiseMode::Raw);
+    }});
+
+    run_precision_sweep("ejemplo07_basket_uncorr", methods, price_ref, eps_list);
 
     return 0;
 }
