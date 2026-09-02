@@ -7,8 +7,11 @@
 #include <iostream>
 #include <sstream>
 #include <cassert>
-#include <print>
+#include <format>
+template<typename... Args> static void mc_println(const std::string& fmt, Args&&... args) { std::puts(std::vformat(fmt, std::make_format_args(args...)).c_str()); }
+#include <cstdio>
 #include <Eigen/Eigenvalues>
+#include <chrono>
 
 // Función de distribución acumulada de la normal estándar
 static double norm_cdf(double x) {
@@ -51,7 +54,43 @@ double geom_asian_analytic(double S0, double K, double T, double mu,
 // Precomputación del Brownian Bridge //
 // ---------------------------------- //
 
+#include <map>
+
+// bb_precompute / pca_compute son deterministas en (N, T). Los ejemplos las
+// llaman hasta 30x por nivel de eps; pca_compute hace una eigendescomposicion
+// O(m^3) con Eigen que a m grande (n_steps ~ 2048 en eps finos) cuesta
+// segundos. Memoizacion por (N, T): la 1a llamada calcula, el resto copia cache.
+static BBData bb_precompute_impl(int N, double T);
+static PCAData pca_compute_impl(int m, double T);
+static long long np_key(int n, double T) {
+    return (long long)n * 1000003LL + (long long)std::llround(T * 1e6);
+}
+
 BBData bb_precompute(int N, double T) {
+    static std::map<long long, BBData> memo;
+    auto it = memo.find(np_key(N, T));
+    if (it == memo.end()) {
+        auto t0 = std::chrono::steady_clock::now();
+        it = memo.emplace(np_key(N, T), bb_precompute_impl(N, T)).first;
+        double dt = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+        std::fprintf(stderr, "[precompute] bb_precompute N=%d T=%.5f -> %.3fs\n", N, T, dt);
+    }
+    return it->second;
+}
+
+PCAData pca_compute(int m, double T) {
+    static std::map<long long, PCAData> memo;
+    auto it = memo.find(np_key(m, T));
+    if (it == memo.end()) {
+        auto t0 = std::chrono::steady_clock::now();
+        it = memo.emplace(np_key(m, T), pca_compute_impl(m, T)).first;
+        double dt = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+        std::fprintf(stderr, "[precompute] pca_compute m=%d T=%.5f -> %.3fs\n", m, T, dt);
+    }
+    return it->second;
+}
+
+static BBData bb_precompute_impl(int N, double T) {
     assert(N > 0 && (N & (N - 1)) == 0); // N debe ser potencia de 2
 
     BBData bb;
@@ -128,31 +167,53 @@ void bb_apply(const BBData& bb, double* Z, double* dW, int n_sim) {
 // PCA mediante Eigen   //
 // -------------------- //
 
-PCAData pca_compute(int m, double T) {
+// Descomposicion espectral CERRADA de la covarianza del MB C[i,j]=min(i+1,j+1)*h.
+// C = h*A con A_{pq}=min(p,q) (p,q=1..m). A tiene inversa tridiagonal (2 en la
+// diagonal salvo la ultima entrada, que es 1) => autovectores seno y autovalores
+// analiticos (KL discreta del puente browniano):
+//   lambda_k = h / (4 sin^2( (2k+1)pi / (2(2m+1)) ) ),  k=0..m-1  (k=0 el mayor)
+//   v_k(i)   = sqrt(4/(2m+1)) * sin( (2k+1)(i+1)pi / (2m+1) )
+// Cuesta O(m^2) en vez del O(m^3) del eigensolver de Eigen (300 s a m=2048).
+static Eigen::MatrixXd pca_M_pca_cum_closed_form(int m, double T) {
+    const double h  = T / m;
+    const double den = 2.0 * (2.0 * m + 1.0);
+    const double nrm = std::sqrt(4.0 / (2.0 * m + 1.0));
+    Eigen::MatrixXd Mc(m, m);
+    for (int k = 0; k < m; k++) {
+        double sk = std::sin((2.0 * k + 1.0) * M_PI / den);
+        double sqrt_lambda = std::sqrt(h) / (2.0 * std::abs(sk));
+        double phase = (2.0 * k + 1.0) * M_PI / (2.0 * m + 1.0);
+        for (int i = 0; i < m; i++)
+            Mc(i, k) = nrm * std::sin(phase * (i + 1)) * sqrt_lambda;
+    }
+    return Mc;
+}
+
+static PCAData pca_compute_impl(int m, double T) {
+    // Auto-chequeo unico: la forma cerrada debe reconstruir C a maquina.
+    static bool checked = false;
+    if (!checked) {
+        checked = true;
+        const int mc = 137; const double Tc = 1.0, hc = Tc / mc;
+        Eigen::MatrixXd C(mc, mc);
+        for (int i = 0; i < mc; i++)
+            for (int j = 0; j < mc; j++)
+                C(i, j) = std::min(i + 1, j + 1) * hc;
+        Eigen::MatrixXd Mc = pca_M_pca_cum_closed_form(mc, Tc);
+        double rel = (Mc * Mc.transpose() - C).norm() / C.norm();
+        if (!(rel < 1e-9)) {
+            std::fprintf(stderr, "[pca] forma cerrada FALLA el auto-chequeo (rel=%.3e)\n", rel);
+            std::abort();
+        }
+    }
+
     PCAData pca;
     pca.m = m;
     pca.T = T;
 
-    double h = T / m;
+    Eigen::MatrixXd M_pca_cum = pca_M_pca_cum_closed_form(m, T);
 
-    // Matriz de covarianza del BM: C[i,j] = min(i+1, j+1) * h
-    Eigen::MatrixXd C(m, m);
-    for (int i = 0; i < m; i++)
-        for (int j = 0; j < m; j++)
-            C(i, j) = std::min(i + 1, j + 1) * h;
-
-    // Eigendescomposición simétrica
-    Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> solver(C);
-
-    // Ordenar de mayor a menor eigenvalor
-    Eigen::VectorXd eigenvalues  = solver.eigenvalues().reverse();
-    Eigen::MatrixXd eigenvectors = solver.eigenvectors().rowwise().reverse();
-
-    // M_pca_cum[i,k] = sqrt(λ_k) · v_k[i]
-    Eigen::MatrixXd M_pca_cum = eigenvectors *
-                                 eigenvalues.cwiseMax(0.0).cwiseSqrt().asDiagonal();
-
-    // Operador diferencia: M_pca[0,:] = M_pca_cum[0,:]; M_pca[i,:] = M_pca_cum[i,:] - M_pca_cum[i-1,:]
+    // Operador diferencia: M_pca[0,:] = M_pca_cum[0,:]; M_pca[i,:] -= M_pca_cum[i-1,:]
     Eigen::MatrixXd M_pca = M_pca_cum;
     M_pca.bottomRows(m - 1) -= M_pca_cum.topRows(m - 1);
 
@@ -192,19 +253,24 @@ double estimar_c1_richardson(SimFn sim_fn, double T, int M_rich, int N_pilot, un
 void print_table(const std::vector<TableRow>& rows, double price_ref,
                  double epsilon, const std::string& example_name) {
 
-    std::println("\n[{}]   epsilon = {}", example_name, epsilon);
-    std::println("  Referencia: {:.6f}\n", price_ref);
+    mc_println("\n[{}]   epsilon = {}", example_name, epsilon);
+    mc_println("  Referencia: {:.6f}\n", price_ref);
 
-    std::println("  {:<22}{:>10}{:>10}{:>12}{:>9}{:>10}{:>6}",
-                 "Metodo", "Precio", "StdErr", "N", "T(s)", "|Error|", "OK?");
-    std::println("  {}", std::string(79, '-'));
+    // Columna "R": repeticiones efectivas con semilla distinta (TAREA 2). Con
+    // R>1, StdErr es la desviación típica ENTRE esas R repeticiones dividida
+    // por sqrt(R) (ver RunningStats::std_error en utils.hpp), no el error
+    // estándar intra-corrida; T(s) es la SUMA de las R corridas (coste real).
+    mc_println("  {:<22}{:>10}{:>10}{:>12}{:>9}{:>10}{:>6}{:>5}",
+                 "Metodo", "Precio", "StdErr", "N", "T(s)", "|Error|", "OK?", "R");
+    mc_println("  {}", std::string(84, '-'));
 
     for (const auto& r : rows) {
         double err = std::abs(r.price - price_ref);
         bool   ok  = (err < 2.0 * epsilon);
-        std::println("  {:<22}{:>10.4f}{:>10.4f}{:>12}{:>9.3f}{:>10.4f}{:>6}",
+        mc_println("  {:<22}{:>10.4f}{:>10.4f}{:>12}{:>9.3f}{:>10.4f}{:>6}{:>5}",
                      r.method, r.price, r.std_error, r.n_samples,
-                     r.time_s, err, ok ? "SI" : "NO");
+                     r.time_s, err, ok ? "SI" : "NO", r.n_reps);
     }
-    std::println("");
+    mc_println("");
 }
+

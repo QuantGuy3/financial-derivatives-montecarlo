@@ -10,6 +10,9 @@
 #include <cub/cub.cuh>
 
 #include <algorithm>
+#include <format>
+template<typename... Args> static void mc_println(const std::string& fmt, Args&&... args) { std::puts(std::vformat(fmt, std::make_format_args(args...)).c_str());  std::fflush(stdout); }
+#include <cstdio>
 #include <chrono>
 #include <climits>
 #include <cmath>
@@ -251,6 +254,13 @@ static constexpr int BLOCK_SIZE = 256;
 static long long pow2_floor(long long x) {
     long long p = 1;
     while (p * 2 <= x) p *= 2;
+    return p;
+}
+
+// Menor potencia de 2 >= x (x>=1). El BB/PCA exige n_steps potencia de 2.
+static int pow2_ceil(int x) {
+    int p = 1;
+    while (p < x) p <<= 1;
     return p;
 }
 
@@ -707,6 +717,186 @@ __global__ void kernel_is_gbm(
 }
 
 
+// ---------------------------------------------------------------------- //
+// Kernel de Importance Sampling GENERALIZADO a cualquier construcción de  //
+// ruido (Raw/BB/PCA), para poder ofrecer "QMC + IS" con las 3 variantes   //
+// de trayectoria (ejemplo11). A diferencia de kernel_is_gbm (que parte    //
+// de normales Z sin correlacionar y construye dw=(z+z_star)·sqrt(h) él    //
+// mismo), este kernel recibe el incremento browniano d_dW YA CONSTRUIDO   //
+// (Raw ya escalado, o la salida de kernel_bb_transform/phase1_pca).       //
+//                                                                         //
+// Por qué es correcto para cualquier construcción: el cambio de medida    //
+// de Girsanov que motiva IS aquí es un desplazamiento CONSTANTE del       //
+// incremento browniano en cada uno de los N_steps intervalos de tiempo    //
+// iguales (dw_k' = dw_k + z*·sqrt(h)), sea cual sea el mecanismo usado    //
+// para generar dw_k (Euler puro con normales pseudoaleatorias/Sobol, o    //
+// Sobol transformado por Brownian Bridge/PCA): en los tres casos dw_k es  //
+// el incremento browniano REAL en tiempo (Var(dw_k)=h por construcción),  //
+// así que z_k := dw_k/sqrt(h) es siempre una normal estándar válida para  //
+// reconstruir el ratio de verosimilitud exp(-z*·Σz_k - z*²·N/2). Con Raw, //
+// dw_k = z_k·sqrt(h) exactamente como en kernel_is_gbm, así que este      //
+// kernel reproduce kernel_is_gbm bit a bit en ese caso particular.        //
+// ---------------------------------------------------------------------- //
+__global__ void kernel_is_gbm_dw(
+    const float* __restrict__ d_dW, // incremento browniano YA construido, SIN desplazar
+    double* d_sums,
+    int N_paths, int N_steps, float h, float sqrt_h)
+{
+    int p = blockIdx.x * BLOCK_SIZE + threadIdx.x;
+    float S = (p < N_paths) ? c_p.S0 : 0.0f;
+    float z_sum = 0.0f;
+
+    if (p < N_paths) {
+        for (int k = 0; k < N_steps; k++) {
+            float dw0 = d_dW[k * N_paths + p];
+            z_sum += dw0 / sqrt_h;
+            float dw = dw0 + c_p.z_star * sqrt_h;
+            S = d_euler_gbm(S, dw, h);
+        }
+    }
+    float lr = (p < N_paths) ? expf(-c_p.z_star * z_sum
+                                        - 0.5f * c_p.z_star * c_p.z_star * N_steps) : 1.0f;
+    float payoff = (p < N_paths) ? fmaxf(S - c_p.K, 0.0f) * c_p.discount * lr : 0.0f;
+    double Y = (double)payoff, Y2 = Y * Y;
+    CUB_REDUCE2(Y, Y2, d_sums, d_sums + 1);
+}
+
+
+// ---------------------------------------------------------------------- //
+// Kernel MLMC con variable de control (Ej. 9: Asian aritmética + control  //
+// Asian geométrica), niveles fino/grueso acoplados con las MISMAS         //
+// trayectorias GBM (mismo acoplamiento que kernel_mlmc), pero aplicando   //
+// el control variate DENTRO de cada nivel, antes de restar fino menos     //
+// grueso, en vez de una sola vez sobre el estimador final (como hace      //
+// kernel_gbm_asian_cv en el MC de un solo nivel). Así el CV reduce la     //
+// varianza de cada corrección Y_l - Y_{l-1}, que es justo la cantidad     //
+// que fija el coste de MLMC (Giles 2008, sec. 3).                        //
+//                                                                         //
+// Es una variante ESPECÍFICA de GBM+Asian/GeomAsian (no genérica sobre    //
+// ModelVariant/PayoffVariant): kernel_gbm_asian_cv tampoco lo es, y es el //
+// único uso real de CV+MLMC en el proyecto (ejemplo09). Generalizar el    //
+// kernel_mlmc con plantilla + control hubiera exigido rehacer d_step/     //
+// d_payoff para llevar dos trayectorias y dos "running" en paralelo; se   //
+// prioriza aquí la corrección/legibilidad sobre la reutilización.        //
+//                                                                         //
+// d_sums[4] = {sum_dY_cv, sum_dY_cv², sum_Yf_cv, sum_Yf_cv²}, mismo       //
+// convenio que kernel_mlmc (dY = fino-grueso ya con CV aplicado; Yf =     //
+// solo el fino, usado cuando N_coarse==0, es decir nivel 0).             //
+// ---------------------------------------------------------------------- //
+__global__ void kernel_mlmc_cv_gbm_asian(
+    const float* __restrict__ d_in,
+    double* d_sums,
+    int N_paths, int N_fine, int N_coarse, int M,
+    float h_fine, float h_coarse, float sqrt_h_fine)
+{
+    int p = blockIdx.x * BLOCK_SIZE + threadIdx.x;
+
+    float Sf = (p < N_paths) ? c_p.S0 : 0.0f;
+    float Sc = Sf;
+    float arith_f = 0.0f, log_f = 0.0f, arith_c = 0.0f, log_c = 0.0f;
+    float acc1 = 0.0f;
+
+    if (p < N_paths) {
+        for (int k = 0; k < N_fine; k++) {
+            float dw = d_in[k * N_paths + p];
+            acc1 += dw;
+            Sf = d_euler_gbm(Sf, dw, h_fine);
+            arith_f += Sf;
+            log_f += logf(Sf);
+
+            // Paso grueso cada M pasos finos, igual que kernel_mlmc.
+            if ((k + 1) % M == 0) {
+                Sc = Sc + c_p.mu * Sc * h_coarse + c_p.sigma * Sc * acc1;
+                acc1 = 0.0f;
+                if (N_coarse > 0) {
+                    arith_c += Sc;
+                    log_c += logf(Sc);
+                }
+            }
+        }
+    }
+
+    // Guarda (p < N_paths) en cada paso: los hilos de relleno no deben aportar
+    // beta·E_ctrl a Y_cv (mismo motivo que en kernel_gbm_asian_cv).
+    float Y_arith_f = (p < N_paths) ? fmaxf(arith_f / N_fine - c_p.K, 0.0f) : 0.0f;
+    float Y_geom_f  = (p < N_paths) ? fmaxf(expf(log_f / N_fine) - c_p.K, 0.0f) : 0.0f;
+    float Y_cv_f    = (p < N_paths) ? (Y_arith_f - c_p.beta_cv * (Y_geom_f - c_p.E_ctrl)) : 0.0f;
+
+    float Y_cv_c = 0.0f;
+    if (N_coarse > 0) {
+        float Y_arith_c = (p < N_paths) ? fmaxf(arith_c / N_coarse - c_p.K, 0.0f) : 0.0f;
+        float Y_geom_c  = (p < N_paths) ? fmaxf(expf(log_c / N_coarse) - c_p.K, 0.0f) : 0.0f;
+        Y_cv_c = (p < N_paths) ? (Y_arith_c - c_p.beta_cv * (Y_geom_c - c_p.E_ctrl)) : 0.0f;
+    }
+
+    double dY = (double)(Y_cv_f - Y_cv_c), dY2 = dY * dY;
+    double yf = (double)Y_cv_f, yf2 = yf * yf;
+    CUB_REDUCE4(dY, dY2, yf, yf2, d_sums, d_sums + 1, d_sums + 2, d_sums + 3);
+}
+
+
+// ---------------------------------------------------------------------- //
+// Kernel MLMC con Importance Sampling (Ej. 11: GBM + call europea),       //
+// GENERALIZADO a cualquier construcción de ruido (Raw/BB/PCA): recibe      //
+// d_dW ya construido (no normales Z sueltas) para el nivel FINO, igual    //
+// que kernel_mlmc recibe el incremento ya escalado. Reconstruye z_k =    //
+// dW_k/sqrt(h_fine) para el ratio de verosimilitud (válido con cualquier  //
+// construcción del ruido, ver kernel_is_gbm_dw más arriba para la         //
+// justificación completa), desplaza dw_k' = dW_k + z*_nivel·sqrt(h_fine)  //
+// y acopla fino/grueso agregando esos incrementos YA desplazados en       //
+// bloques de M, exactamente como kernel_mlmc. Un único ratio de           //
+// verosimilitud (sobre el desplazamiento total de los N_fine pasos)       //
+// pondera por igual el payoff fino y el grueso antes de restar.          //
+//                                                                         //
+// z_star_level ya viene reescalado por el llamante como                  //
+// z_star_input/sqrt(N_fine) (igual criterio que run_is_cuda con n_steps), //
+// de modo que el desplazamiento total en el browniano, z_star_input·√T,  //
+// no dependa del nivel.                                                   //
+//                                                                         //
+// Específico de GBM+European, igual que kernel_is_gbm/kernel_is_gbm_dw.  //
+// d_sums[4] = {sum_dY, sum_dY², sum_Yf, sum_Yf²}, ya ponderados por LR.   //
+// ---------------------------------------------------------------------- //
+__global__ void kernel_mlmc_is_gbm_dw(
+    const float* __restrict__ d_dW, // incremento browniano YA construido del nivel fino, SIN desplazar
+    double* d_sums,
+    int N_paths, int N_fine, int N_coarse, int M,
+    float h_fine, float h_coarse, float sqrt_h_fine,
+    float z_star_level)
+{
+    int p = blockIdx.x * BLOCK_SIZE + threadIdx.x;
+
+    float Sf = (p < N_paths) ? c_p.S0 : 0.0f;
+    float Sc = Sf;
+    float acc1 = 0.0f;
+    float z_sum = 0.0f;
+
+    if (p < N_paths) {
+        for (int k = 0; k < N_fine; k++) {
+            float dw0 = d_dW[k * N_paths + p];
+            z_sum += dw0 / sqrt_h_fine;
+            float dw = dw0 + z_star_level * sqrt_h_fine;
+            acc1 += dw;
+            Sf = d_euler_gbm(Sf, dw, h_fine);
+
+            if ((k + 1) % M == 0) {
+                Sc = Sc + c_p.mu * Sc * h_coarse + c_p.sigma * Sc * acc1;
+                acc1 = 0.0f;
+            }
+        }
+    }
+
+    float lr = (p < N_paths)
+        ? expf(-z_star_level * z_sum - 0.5f * z_star_level * z_star_level * N_fine)
+        : 1.0f;
+    float Yf = (p < N_paths) ? fmaxf(Sf - c_p.K, 0.0f) * c_p.discount * lr : 0.0f;
+    float Yc = (p < N_paths && N_coarse > 0) ? fmaxf(Sc - c_p.K, 0.0f) * c_p.discount * lr : 0.0f;
+
+    double dY = (double)(Yf - Yc), dY2 = dY * dY;
+    double yf = (double)Yf, yf2 = yf * yf;
+    CUB_REDUCE4(dY, dY2, yf, yf2, d_sums, d_sums + 1, d_sums + 2, d_sums + 3);
+}
+
+
 // ------------------------------------ //
 // Auxiliares para escalar y convertir //
 // ------------------------------------ //
@@ -811,7 +1001,7 @@ __global__ void kernel_gen_hh_scrambled_sobol_normal(
     // Punto de Sobol (sin scrambling) en esta dimensión y posición.
     unsigned int dv[32];
     #pragma unroll
-    for (int i = 0; i < 32; i++) dv[i] = dirvectors[dim].v[i];
+    for (int i = 0; i < 32; i++) dv[i] = dirvectors[dim][i];
     curandStateSobol32_t state;
     curand_init(dv, offset + (unsigned int)p, &state);
     unsigned int raw = curand(&state);
@@ -819,9 +1009,11 @@ __global__ void kernel_gen_hh_scrambled_sobol_normal(
     unsigned int base = splitmix32(replica_salt) ^ (unsigned int)dim;
     unsigned int scrambled = hh_scramble(raw, base);
 
-    // Uniforme en (0,1].
-    float u = ((float)scrambled + 1.0f) * (1.0f / 4294967296.0f);
-    out[idx] = normcdfinvf(u);
+    // Uniforme estrictamente en (0,1): en float, (float)scrambled se redondea a
+    // 2^32 para scrambled cercano al maximo y u sale exactamente 1.0f, con lo
+    // que normcdfinvf(1) = +inf y contamina toda la suma QMC. En double no.
+    double u = ((double)scrambled + 0.5) * (1.0 / 4294967296.0);
+    out[idx] = (float)normcdfinv(u);
 }
 
 // Kernel para generar normales sobol. Número de la secuencia 'offser64' con scrambling
@@ -832,9 +1024,7 @@ static void gen_scrambled_sobol_normal_replica(
 {
     ensure_sobol_dirvectors_uploaded();
     if (offset64 > (unsigned long long)UINT_MAX)
-        throw std::runtime_error("gen_scrambled_sobol_normal_replica: offset "
-            + std::to_string(offset64) + " excede el límite de 32 bits de curand_init "
-            + "(API de dispositivo); reduzca N o max_doublings.");
+        throw SobolLimitReached{};
     long long total = D * chunk;
     int blk = (int)((total + BLOCK_SIZE - 1) / BLOCK_SIZE);
     kernel_gen_hh_scrambled_sobol_normal<<<blk, BLOCK_SIZE, 0, stream>>>(
@@ -1409,7 +1599,8 @@ MCResult run_mlmc_cuda(const ModelVariant& model, const PayoffVariant& payoff,
     };
 
     // Piloto inicial: los L+1 niveles se lanzan todos a la vez.
-    unsigned seed_ctr = 42u;
+    // (antes 42u fijo; ahora cfg.seed, ver TAREA 2 / repeticiones con distinta semilla)
+    unsigned seed_ctr = cfg.seed;
     for (int l = 0; l <= L; l++) launch_level(l, cfg.pilot_n, seed_ctr++);
     for (int l = 0; l <= L; l++) {
         auto s = collect_level(l);
@@ -1529,8 +1720,8 @@ MCResult run_qmc_cuda(const ModelVariant& model, const PayoffVariant& payoff,
     // Primera réplica ya arranca con tantos puntos como quepan en un lote (en vez de
     // un N pequeño fijo), para aprovechar la GPU desde el primer duplicado. Con Sobol,
     // redondeado a potencia de 2 para garantizar las propiedades de las redes-(t,m,s).
-    long long N_per_replica = std::max(64LL, chunk_cap);
-    if (use_sobol) N_per_replica = pow2_floor(N_per_replica);
+    long long N_per_replica = std::min<long long>(chunk_cap, 4096);
+    if (use_sobol) N_per_replica = pow2_floor(std::max(64LL, N_per_replica));
 
     // Cada réplica acumula en su propio d_sums a través de los duplicados: al doblar
     // N_per_replica solo se generan y suman los puntos nuevos (rango [N_done[r],
@@ -1561,11 +1752,11 @@ MCResult run_qmc_cuda(const ModelVariant& model, const PayoffVariant& payoff,
                 // réplica, sin carril.
                 gen_scrambled_sobol_normal_replica(d_Z_r, D, chunk,
                     (unsigned long long)done,
-                    /*replica_salt=*/42u + (unsigned)r);
+                    /*replica_salt=*/cfg.seed + (unsigned)r);
             } else {
                 curandGenerator_t gen;
                 CURAND_CHECK(curandCreateGenerator(&gen, CURAND_RNG_PSEUDO_XORWOW));
-                CURAND_CHECK(curandSetPseudoRandomGeneratorSeed(gen, 42u + r));
+                CURAND_CHECK(curandSetPseudoRandomGeneratorSeed(gen, cfg.seed + r));
                 CURAND_CHECK(curandSetGeneratorOffset(gen, (unsigned long long)done * D));
                 CURAND_CHECK(curandGenerateNormal(gen, d_Z_r, gen_count, 0.0f, 1.0f));
                 curandDestroyGenerator(gen);
@@ -1624,8 +1815,7 @@ MCResult run_qmc_cuda(const ModelVariant& model, const PayoffVariant& payoff,
     for (int doublings = 0; doublings < cfg.max_doublings; doublings++) {
         // Porque si el número de muestras es excesivamente grande, hay desbordamiento de memoria 
         if (use_sobol && (unsigned long long)N_per_replica > (unsigned long long)UINT_MAX)
-            throw std::runtime_error("run_qmc_cuda: N_per_replica=" + std::to_string(N_per_replica)
-                + " excede el límite de 32 bits del offset de Sobol.");
+            throw SobolLimitReached{};
 
         // Si el duplicado anterior
         // ya generó de más (ver más abajo), N_done[r] == N_per_replica y no hace nada.
@@ -1845,10 +2035,7 @@ MCResult run_mlqmc_cuda(const ModelVariant& model, const PayoffVariant& payoff,
             unsigned long long salt_idx = (unsigned long long)l * (unsigned long long)R_reps + (unsigned long long)r;
 
             if (use_sobol && (unsigned long long)(next_off[l][r] + N_per_rep) > (unsigned long long)UINT_MAX)
-                throw std::runtime_error("run_mlqmc_cuda: nivel " + std::to_string(l)
-                    + ", réplica " + std::to_string(r) + ": offset "
-                    + std::to_string(next_off[l][r] + N_per_rep)
-                    + " excede el límite de 32 bits del offset de Sobol.");
+                throw SobolLimitReached{};
 
             CUDA_CHECK(cudaMemsetAsync(j.d_sums[r], 0, 4*sizeof(double), j.stream));
 
@@ -1867,12 +2054,12 @@ MCResult run_mlqmc_cuda(const ModelVariant& model, const PayoffVariant& payoff,
                     // Scramble propio de (nivel, réplica).
                     gen_scrambled_sobol_normal_replica(j.d_Z, D, batch,
                         (unsigned long long)(next_off[l][r] + done),
-                        /*replica_salt=*/42u + (unsigned)salt_idx, j.stream);
+                        /*replica_salt=*/qmc_cfg.seed + (unsigned)salt_idx, j.stream);
                 } else {
                     curandGenerator_t gen;
                     CURAND_CHECK(curandCreateGenerator(&gen, CURAND_RNG_PSEUDO_XORWOW));
                     CURAND_CHECK(curandSetStream(gen, j.stream));
-                    CURAND_CHECK(curandSetPseudoRandomGeneratorSeed(gen, 42u + (unsigned)salt_idx));
+                    CURAND_CHECK(curandSetPseudoRandomGeneratorSeed(gen, qmc_cfg.seed + (unsigned)salt_idx));
                     CURAND_CHECK(curandSetGeneratorOffset(gen,
                         (unsigned long long)(next_off[l][r] + done) * D));
                     CURAND_CHECK(curandGenerateNormal(gen, j.d_Z, gen_count, 0.0f, 1.0f));
@@ -2168,9 +2355,15 @@ MCResult run_qmc_cv_cuda(const ModelVariant& main_model,
                          const PayoffVariant& ctrl_payoff,
                          double E_ctrl, double beta,
                          double eps, int n_steps,
-                         const QMCConfig& cfg) {
+                         const QMCConfig& cfg,
+                         NoiseMode mode,
+                         DeviceBBData* dev_bb, DevicePCAData* dev_pca) {
     auto t0 = Clock::now();
     ModelKind mk_main = model_kind(main_model);
+    (void)ctrl_model; (void)ctrl_payoff; // control evaluado sobre las MISMAS trayectorias, via kernel_*_cv
+
+    cublasHandle_t cublas = nullptr;
+    if (mode == NoiseMode::PCA) { CUBLAS_CHECK(cublasCreate(&cublas)); }
 
     KernelParams kp = make_params(main_model, main_payoff, n_steps);
     kp.beta_cv = (float)beta;
@@ -2186,7 +2379,7 @@ MCResult run_qmc_cv_cuda(const ModelVariant& main_model,
     // suficiente (argumentamos) para estimar varianza inter-réplica), redondeado a potencia de 2
     // (calidad de red-(t,m,s) completa; los duplicados sucesivos lo mantienen así).
     long long budget_floats = gpu_free_bytes() / (long long)sizeof(float);
-    long long N_per_rep = std::max(512LL, budget_floats / std::max((long long)n_steps, 1LL));
+    long long N_per_rep = std::min<long long>(4096, std::max(512LL, budget_floats / std::max((long long)n_steps, 1LL)));
     N_per_rep = pow2_floor(N_per_rep);
     double var_of_means = 1e30, grand_mean = 0.0;
     long long total_N = 0;
@@ -2206,14 +2399,14 @@ MCResult run_qmc_cv_cuda(const ModelVariant& main_model,
 
     for (int doublings = 0; doublings < cfg.max_doublings; doublings++) {
         if ((unsigned long long)N_per_rep > (unsigned long long)UINT_MAX)
-            throw std::runtime_error("run_qmc_cv_cuda: N_per_rep=" + std::to_string(N_per_rep)
-                + " excede el límite de 32 bits del offset de Sobol.");
+            throw SobolLimitReached{};
 
         // Lote tan grande como quepa en la GPU ahora mismo, topado a INT_MAX/2 
         // puntos para que (int)batch y D*batch no
         // desborden en los kernels.
         long long D = (long long)n_steps;
-        long long budget_floats_it = gpu_free_bytes() / (long long)sizeof(float);
+        long long buffers = (mode == NoiseMode::Raw) ? 1 : 3;
+        long long budget_floats_it = gpu_free_bytes() / buffers / (long long)sizeof(float);
         long long batch_cap = std::max(2LL, budget_floats_it / std::max(D, 1LL));
         batch_cap = std::min(batch_cap, (long long)INT_MAX / std::max(D, 1LL) / 2);
         batch_cap = (batch_cap + 1) & ~1LL;
@@ -2229,17 +2422,42 @@ MCResult run_qmc_cv_cuda(const ModelVariant& main_model,
                 // +2 de margen y gen_count par: cuRAND exige count par, y D*batch
                 // puede ser impar.
                 long long gen_count = (D * batch + 1) & ~1LL;
-                float* d_dW = nullptr;
-                CUDA_CHECK(cudaMalloc(&d_dW, gen_count * sizeof(float) + 2*sizeof(float)));
+                float* d_Z = nullptr;
+                CUDA_CHECK(cudaMalloc(&d_Z, gen_count * sizeof(float) + 2*sizeof(float)));
 
                 // Scramble propio de la réplica r (API de dispositivo): el offset es
                 // el progreso dentro de la secuencia YA independiente de esta réplica.
-                gen_scrambled_sobol_normal_replica(d_dW, D, batch,
+                gen_scrambled_sobol_normal_replica(d_Z, D, batch,
                     (unsigned long long)(done + done_local),
-                    /*replica_salt=*/42u + (unsigned)r);
+                    /*replica_salt=*/cfg.seed + (unsigned)r);
 
-                kernel_scale<<<((int)(D*batch)+BLOCK_SIZE-1)/BLOCK_SIZE,BLOCK_SIZE>>>(
-                    d_dW, sqrtf(kp.h), D*batch);
+                float* d_dW = nullptr;
+                CUDA_CHECK(cudaMalloc(&d_dW, D * batch * sizeof(float)));
+
+                if (mode == NoiseMode::BrownianBridge && dev_bb) {
+                    float* d_W_scratch = nullptr;
+                    CUDA_CHECK(cudaMalloc(&d_W_scratch, (n_steps+1)*batch*sizeof(float)));
+                    CUDA_CHECK(cudaMemset(d_W_scratch, 0, (n_steps+1)*batch*sizeof(float)));
+                    int blkb = ((int)batch + BLOCK_SIZE - 1) / BLOCK_SIZE;
+                    kernel_bb_transform<<<blkb, BLOCK_SIZE>>>(
+                        d_Z, d_dW, d_W_scratch,
+                        dev_bb->d_map_idx, dev_bb->d_left_idx, dev_bb->d_right_idx,
+                        dev_bb->d_wl, dev_bb->d_wr, dev_bb->d_std_dev,
+                        n_steps, (int)batch);
+                    cudaFree(d_W_scratch);
+                } else if (mode == NoiseMode::PCA && dev_pca) {
+                    __half* d_Z_f16 = nullptr;
+                    CUDA_CHECK(cudaMalloc(&d_Z_f16, D * batch * sizeof(__half)));
+                    int blk2 = ((int)(D*batch)+BLOCK_SIZE-1)/BLOCK_SIZE;
+                    kernel_cast_f32_to_f16<<<blk2,BLOCK_SIZE>>>(d_Z, d_Z_f16, (int)(D*batch));
+                    phase1_pca(cublas, dev_pca->d_M_pca_f16, d_Z_f16, d_dW, (int)D, (int)batch);
+                    cudaFree(d_Z_f16);
+                } else {
+                    // Modo Raw: escalar Z -> dW (mismo criterio que el resto del fichero).
+                    CUDA_CHECK(cudaMemcpy(d_dW, d_Z, D*batch*sizeof(float), cudaMemcpyDeviceToDevice));
+                    kernel_scale<<<((int)(D*batch)+BLOCK_SIZE-1)/BLOCK_SIZE,BLOCK_SIZE>>>(
+                        d_dW, sqrtf(kp.h), D*batch);
+                }
 
                 int blk = ((int)batch+BLOCK_SIZE-1)/BLOCK_SIZE;
                 if (mk_main == ModelKind::GBM)
@@ -2249,6 +2467,7 @@ MCResult run_qmc_cv_cuda(const ModelVariant& main_model,
                 CUDA_CHECK(cudaDeviceSynchronize());
 
                 cudaFree(d_dW);
+                cudaFree(d_Z);
                 done_local += batch;
             }
             if (extra > 0) N_done[r] = N_per_rep;
@@ -2272,6 +2491,7 @@ MCResult run_qmc_cv_cuda(const ModelVariant& main_model,
         N_per_rep *= 2;
     }
     for (int r = 0; r < R; r++) cudaFree(d_sums_r[r]);
+    if (cublas) cublasDestroy(cublas);
 
     double t_s = std::chrono::duration<double>(Clock::now() - t0).count();
     return {grand_mean, std::sqrt(var_of_means), total_N, t_s};
@@ -2293,7 +2513,7 @@ MCResult run_is_cuda(const GBMParams& model, const European& payoff,
     kp.discount = (float)std::exp(-payoff.r * payoff.T);
     kp.payoff_kind = PayoffKind::European;
 
-    int n_steps = std::max(4, (int)std::ceil(model.T / eps));
+    int n_steps = std::min(1 << 11, pow2_ceil(std::max(4, (int)std::ceil(model.T / eps))));
     kp.z_star = (float)(z_star / std::sqrt((double)n_steps));
     kp.h = kp.T / n_steps;
     CUDA_CHECK(cudaMemcpyToSymbol(c_p, &kp, sizeof(kp)));
@@ -2365,10 +2585,1216 @@ MCResult run_is_cuda(const GBMParams& model, const European& payoff,
 }
 
 
+
+// ============================================================= //
+// run_mlmc_cv_cuda: MLMC + variable de control, nivel a nivel   //
+// ============================================================= //
+// run_mlmc_cv_cuda: MLMC + variable de control, nivel a nivel   //
+// ============================================================= //
+//
+// Mismo patron de streams concurrentes por nivel que run_mlmc_cuda (cada
+// nivel tiene su propio stream/generador/memoria, asi que varios niveles se
+// ejecutan de verdad en paralelo en la GPU) - la unica diferencia es que el
+// kernel de nivel (kernel_mlmc_cv_gbm_asian) calcula el payoff CON el
+// control variate ya aplicado, en vez de despachar por (modelo,payoff) via
+// MLMC_TABLE. Solo GBM+Asian/GeomAsian: es el unico caso real (ejemplo09) y
+// el kernel es especifico, igual que kernel_gbm_asian_cv.
+MCResult run_mlmc_cv_cuda(const ModelVariant& main_model,
+                          const ModelVariant& ctrl_model,
+                          const PayoffVariant& payoff_main,
+                          const PayoffVariant& payoff_ctrl,
+                          double E_ctrl, double beta,
+                          double eps, const MLMCConfig& cfg) {
+    auto t0 = Clock::now();
+    ModelKind mk = model_kind(main_model);
+    if (mk != ModelKind::GBM)
+        throw std::runtime_error("run_mlmc_cv_cuda: solo soportado para GBM (kernel_mlmc_cv_gbm_asian "
+            "es especifico de Asian aritmetica principal + control Asian geometrica sobre GBM).");
+    (void)ctrl_model; (void)payoff_ctrl; // mismas trayectorias GBM que el principal; no se simulan aparte
+
+    int M = cfg.M;
+    int max_L = cfg.max_L;
+    double T = model_T(main_model);
+
+    KernelParams kp = make_params(main_model, payoff_main, 1);
+    kp.M_refine = M;
+    kp.beta_cv = (float)beta;
+    kp.E_ctrl = (float)E_ctrl;
+    CUDA_CHECK(cudaMemcpyToSymbol(c_p, &kp, sizeof(kp)));
+
+    int L = 2;
+    std::vector<double> E_l(max_L+1, 0.0), V_l(max_L+1, 0.0);
+    std::vector<long long> N_l(max_L+1, 0);
+
+    // Recursos propios por nivel (stream + generador + memoria), para poder tener
+    // varios niveles ejecutandose de verdad en paralelo en la GPU (identico a
+    // run_mlmc_cuda).
+    struct LevelJob {
+        cudaStream_t stream = nullptr;
+        curandGenerator_t gen{};
+        float* d_Z = nullptr;
+        double* d_sums = nullptr;
+        double h_sums[4] = {};
+    };
+    std::vector<LevelJob> jobs(max_L + 1);
+    for (auto& j : jobs) CUDA_CHECK(cudaStreamCreateWithFlags(&j.stream, cudaStreamNonBlocking));
+
+    auto launch_level = [&](int l, long long n_paths, unsigned seed) {
+        n_paths = (n_paths + 1) & ~1LL; // cuRAND exige count par
+        int N_fine = (l == 0) ? 1 : (int)std::round(std::pow(M, l));
+        int N_coarse = (l == 0) ? 0 : N_fine / M;
+        float h_fine = (float)(T / N_fine);
+        float h_coarse = (float)(T / std::max(N_coarse, 1));
+        float sqrt_hf = sqrtf(h_fine);
+        long long D = (long long)N_fine; // GBM: un solo factor de ruido
+
+        long long budget_floats = gpu_free_bytes() / (max_L + 1) / (long long)sizeof(float);
+        long long batch_cap = std::max(2LL, budget_floats / std::max(D, 1LL));
+        batch_cap = std::min(batch_cap, (long long)INT_MAX / 2);
+        batch_cap = (batch_cap + 1) & ~1LL;
+        batch_cap = std::min(batch_cap, n_paths);
+
+        LevelJob& j = jobs[l];
+        CUDA_CHECK(cudaMalloc(&j.d_Z, D * batch_cap * sizeof(float) + 2*sizeof(float)));
+        CUDA_CHECK(cudaMalloc(&j.d_sums, 4 * sizeof(double)));
+        CUDA_CHECK(cudaMemsetAsync(j.d_sums, 0, 4 * sizeof(double), j.stream));
+
+        CURAND_CHECK(curandCreateGenerator(&j.gen, CURAND_RNG_PSEUDO_XORWOW));
+        CURAND_CHECK(curandSetStream(j.gen, j.stream));
+        CURAND_CHECK(curandSetPseudoRandomGeneratorSeed(j.gen, seed));
+
+        long long done = 0;
+        while (done < n_paths) {
+            long long batch = std::min(batch_cap, n_paths - done);
+            long long gen_count = (D * batch + 1) & ~1LL;
+            CURAND_CHECK(curandGenerateNormal(j.gen, j.d_Z, gen_count, 0.0f, 1.0f));
+            int blk_s = (int)((gen_count + BLOCK_SIZE - 1) / BLOCK_SIZE);
+            kernel_scale<<<blk_s, BLOCK_SIZE, 0, j.stream>>>(j.d_Z, sqrt_hf, gen_count);
+            int blocks = (int)((batch + BLOCK_SIZE - 1) / BLOCK_SIZE);
+            kernel_mlmc_cv_gbm_asian<<<blocks, BLOCK_SIZE, 0, j.stream>>>(
+                j.d_Z, j.d_sums, (int)batch, N_fine, N_coarse, M, h_fine, h_coarse, sqrt_hf);
+            done += batch;
+        }
+    };
+
+    auto collect_level = [&](int l) -> std::array<double,4> {
+        LevelJob& j = jobs[l];
+        CUDA_CHECK(cudaMemcpyAsync(j.h_sums, j.d_sums, 4*sizeof(double),
+                                    cudaMemcpyDeviceToHost, j.stream));
+        CUDA_CHECK(cudaStreamSynchronize(j.stream));
+        curandDestroyGenerator(j.gen);
+        cudaFree(j.d_Z); cudaFree(j.d_sums);
+        j.d_Z = nullptr; j.d_sums = nullptr;
+        return {j.h_sums[0], j.h_sums[1], j.h_sums[2], j.h_sums[3]};
+    };
+
+    unsigned seed_ctr = cfg.seed;
+    for (int l = 0; l <= L; l++) launch_level(l, cfg.pilot_n, seed_ctr++);
+    for (int l = 0; l <= L; l++) {
+        auto s = collect_level(l);
+        long long np = cfg.pilot_n;
+        double em = s[0] / np;
+        V_l[l] = std::max(0.0, s[1]/np - em*em);
+        E_l[l] = em;
+        N_l[l] = np;
+    }
+
+    bool converged = false;
+    int iter = 0;
+    while (!converged && L <= max_L && iter++ < 50) {
+        double sum_term = 0.0;
+        for (int l = 0; l <= L; l++)
+            sum_term += std::sqrt(V_l[l] * std::pow((double)M, l));
+
+        std::vector<long long> N_opt(L+1);
+        for (int l = 0; l <= L; l++) {
+            double C_l = std::pow((double)M, l);
+            N_opt[l] = (long long)std::ceil(2.0/(eps*eps) * std::sqrt(V_l[l]/C_l) * sum_term);
+            N_opt[l] = std::max(N_opt[l], 100LL);
+        }
+
+        std::vector<long long> extra(L+1, 0);
+        for (int l = 0; l <= L; l++) {
+            if (N_opt[l] > N_l[l]) {
+                extra[l] = N_opt[l] - N_l[l];
+                launch_level(l, extra[l], seed_ctr++);
+            }
+        }
+        for (int l = 0; l <= L; l++) {
+            if (extra[l] > 0) {
+                auto s = collect_level(l);
+                long long N_new = N_l[l] + extra[l];
+                double total_sum = E_l[l] * N_l[l] + s[0];
+                double total_s2 = (V_l[l] + E_l[l]*E_l[l]) * N_l[l] + s[1];
+                E_l[l] = total_sum / N_new;
+                V_l[l] = std::max(0.0, total_s2/N_new - E_l[l]*E_l[l]);
+                N_l[l] = N_new;
+            }
+        }
+
+        double bias_est = std::abs(E_l[L]) / (M - 1);
+        if (L >= 1) bias_est = std::max(bias_est, std::abs(E_l[L-1]) * M / (M*M - M));
+        converged = (bias_est < eps / std::sqrt(2.0));
+
+        if (!converged && L < max_L) {
+            L++;
+            launch_level(L, cfg.pilot_n, seed_ctr++);
+            auto s = collect_level(L);
+            long long np = cfg.pilot_n;
+            double em = s[0] / np;
+            V_l[L] = std::max(0.0, s[1]/np - em*em);
+            E_l[L] = em;
+            N_l[L] = np;
+        }
+    }
+
+    for (auto& j : jobs) cudaStreamDestroy(j.stream);
+
+    double price = 0.0, var_sum = 0.0;
+    long long N_total = 0;
+    for (int l = 0; l <= L; l++) {
+        price += E_l[l];
+        var_sum += (N_l[l] > 0 ? V_l[l] / N_l[l] : 0.0);
+        N_total += N_l[l];
+    }
+    double t_s = std::chrono::duration<double>(Clock::now() - t0).count();
+    return {price, std::sqrt(var_sum), N_total, t_s};
+}
+
+
+// ================================================================ //
+// run_mlqmc_cv_cuda: MLMC + CV con ruido Sobol (R replicas) por     //
+// nivel, con las 3 construcciones de trayectoria (Raw/BB/PCA). Es   //
+// una adaptacion de run_mlqmc_cuda: mismo patron de streams         //
+// concurrentes por nivel y de replicas Sobol con var_of_means/R,    //
+// sustituyendo el despacho generico MLMC_TABLE por el kernel fijo   //
+// kernel_mlmc_cv_gbm_asian (con CV ya aplicado). Solo GBM.          //
+// ================================================================ //
+MCResult run_mlqmc_cv_cuda(const ModelVariant& main_model,
+                           const ModelVariant& ctrl_model,
+                           const PayoffVariant& payoff_main,
+                           const PayoffVariant& payoff_ctrl,
+                           double E_ctrl, double beta,
+                           double eps, const MLMCConfig& ml_cfg,
+                           const QMCConfig& qmc_cfg, NoiseMode mode,
+                           std::vector<DeviceBBData*> bb_list,
+                           std::vector<DevicePCAData*> pca_list) {
+    auto t0 = Clock::now();
+    ModelKind mk = model_kind(main_model);
+    if (mk != ModelKind::GBM)
+        throw std::runtime_error("run_mlqmc_cv_cuda: solo soportado para GBM.");
+    (void)ctrl_model; (void)payoff_ctrl;
+
+    int M = ml_cfg.M;
+    int max_L = ml_cfg.max_L;
+    double T = model_T(main_model);
+
+    KernelParams kp = make_params(main_model, payoff_main, 1);
+    kp.M_refine = M;
+    kp.beta_cv = (float)beta;
+    kp.E_ctrl = (float)E_ctrl;
+    CUDA_CHECK(cudaMemcpyToSymbol(c_p, &kp, sizeof(kp)));
+
+    int L = 2;
+    int R_reps = qmc_cfg.R;
+
+    std::vector<double> E_l(max_L+1, 0.0), sig2_l(max_L+1, 0.0);
+    std::vector<long long> N_l(max_L+1, 0);
+    std::vector<std::vector<long long>> next_off(max_L+1, std::vector<long long>(R_reps, 0));
+
+    // Recursos propios por nivel: un stream, reutilizado entre replicas/lotes de
+    // ese nivel, y un acumulador d_sums por replica (identico a run_mlqmc_cuda).
+    struct LevelJob {
+        cudaStream_t stream = nullptr;
+        float* d_Z = nullptr;
+        long long d_Z_cap = 0;
+        float* d_dW = nullptr;
+        long long d_dW_cap = 0;
+        float* d_W_scratch = nullptr;
+        long long d_W_scratch_cap = 0;
+        __half* d_Z_f16 = nullptr;
+        long long d_Z_f16_cap = 0;
+        cublasHandle_t cublas = nullptr;
+        std::vector<double*> d_sums;
+        std::vector<std::array<double,4>> h_sums;
+    };
+    std::vector<LevelJob> jobs(max_L + 1);
+    for (auto& j : jobs) {
+        CUDA_CHECK(cudaStreamCreateWithFlags(&j.stream, cudaStreamNonBlocking));
+        j.d_sums.assign(R_reps, nullptr);
+        j.h_sums.assign(R_reps, {});
+        for (int r = 0; r < R_reps; r++) CUDA_CHECK(cudaMalloc(&j.d_sums[r], 4*sizeof(double)));
+        if (mode == NoiseMode::PCA) {
+            CUBLAS_CHECK(cublasCreate(&j.cublas));
+            CUBLAS_CHECK(cublasSetStream(j.cublas, j.stream));
+        }
+    }
+
+    auto launch_level = [&](int l, long long N_per_rep) {
+        int N_fine = (l == 0) ? 1 : (int)std::round(std::pow(M, l));
+        int N_coarse = (l == 0) ? 0 : N_fine / M;
+        float h_fine = (float)(T / N_fine);
+        float h_coarse = (float)(T / std::max(N_coarse, 1));
+        float sqrt_hf = sqrtf(h_fine);
+        long long D = (long long)N_fine; // GBM: un solo factor de ruido
+        bool use_sobol = (D <= D_MAX_SOBOL);
+
+        if (mode == NoiseMode::BrownianBridge) {
+            if (l >= (int)bb_list.size() || !bb_list[l])
+                throw std::runtime_error("run_mlqmc_cv_cuda: falta bb_list[" + std::to_string(l)
+                    + "] (nivel " + std::to_string(l) + " no precalculado).");
+            if (bb_list[l]->N != N_fine)
+                throw std::runtime_error("run_mlqmc_cv_cuda: bb_list[" + std::to_string(l)
+                    + "] tiene N=" + std::to_string(bb_list[l]->N) + ", se esperaba N_fine="
+                    + std::to_string(N_fine) + " para este nivel.");
+        }
+        if (mode == NoiseMode::PCA) {
+            if (l >= (int)pca_list.size() || !pca_list[l])
+                throw std::runtime_error("run_mlqmc_cv_cuda: falta pca_list[" + std::to_string(l)
+                    + "] (nivel " + std::to_string(l) + " no precalculado).");
+            if (pca_list[l]->m != N_fine)
+                throw std::runtime_error("run_mlqmc_cv_cuda: pca_list[" + std::to_string(l)
+                    + "] tiene m=" + std::to_string(pca_list[l]->m) + ", se esperaba N_fine="
+                    + std::to_string(N_fine) + " para este nivel.");
+        }
+
+        long long buffers_por_nivel = (mode == NoiseMode::Raw) ? 1 : 3;
+        long long budget_floats = gpu_free_bytes() / (max_L + 1) / buffers_por_nivel
+                                 / (long long)sizeof(float);
+        long long batch_cap = std::max(2LL, budget_floats / std::max(D, 1LL));
+        batch_cap = std::min(batch_cap, (long long)INT_MAX / 2);
+        batch_cap = (batch_cap + 1) & ~1LL;
+        batch_cap = std::min(batch_cap, N_per_rep);
+
+        LevelJob& j = jobs[l];
+        long long need = D * batch_cap + 2;
+        if (need > j.d_Z_cap) {
+            if (j.d_Z) cudaFree(j.d_Z);
+            CUDA_CHECK(cudaMalloc(&j.d_Z, need * sizeof(float)));
+            j.d_Z_cap = need;
+        }
+        if (mode == NoiseMode::BrownianBridge) {
+            if (D * batch_cap > j.d_dW_cap) {
+                if (j.d_dW) cudaFree(j.d_dW);
+                CUDA_CHECK(cudaMalloc(&j.d_dW, D * batch_cap * sizeof(float)));
+                j.d_dW_cap = D * batch_cap;
+            }
+            long long scratch_need = (N_fine + 1) * batch_cap;
+            if (scratch_need > j.d_W_scratch_cap) {
+                if (j.d_W_scratch) cudaFree(j.d_W_scratch);
+                CUDA_CHECK(cudaMalloc(&j.d_W_scratch, scratch_need * sizeof(float)));
+                j.d_W_scratch_cap = scratch_need;
+            }
+        } else if (mode == NoiseMode::PCA) {
+            if (D * batch_cap > j.d_dW_cap) {
+                if (j.d_dW) cudaFree(j.d_dW);
+                CUDA_CHECK(cudaMalloc(&j.d_dW, D * batch_cap * sizeof(float)));
+                j.d_dW_cap = D * batch_cap;
+            }
+            if (D * batch_cap > j.d_Z_f16_cap) {
+                if (j.d_Z_f16) cudaFree(j.d_Z_f16);
+                CUDA_CHECK(cudaMalloc(&j.d_Z_f16, D * batch_cap * sizeof(__half)));
+                j.d_Z_f16_cap = D * batch_cap;
+            }
+        }
+
+        for (int r = 0; r < R_reps; r++) {
+            unsigned long long salt_idx = (unsigned long long)l * (unsigned long long)R_reps + (unsigned long long)r;
+
+            if (use_sobol && (unsigned long long)(next_off[l][r] + N_per_rep) > (unsigned long long)UINT_MAX)
+                throw std::runtime_error("run_mlqmc_cv_cuda: nivel " + std::to_string(l)
+                    + ", replica " + std::to_string(r) + ": offset "
+                    + std::to_string(next_off[l][r] + N_per_rep)
+                    + " excede el limite de 32 bits del offset de Sobol.");
+
+            CUDA_CHECK(cudaMemsetAsync(j.d_sums[r], 0, 4*sizeof(double), j.stream));
+
+            long long done = 0;
+            while (done < N_per_rep) {
+                long long batch = std::min(batch_cap, N_per_rep - done);
+                long long gen_count = (D * batch + 1) & ~1LL;
+
+                if (use_sobol) {
+                    gen_scrambled_sobol_normal_replica(j.d_Z, D, batch,
+                        (unsigned long long)(next_off[l][r] + done),
+                        /*replica_salt=*/qmc_cfg.seed + (unsigned)salt_idx, j.stream);
+                } else {
+                    curandGenerator_t gen;
+                    CURAND_CHECK(curandCreateGenerator(&gen, CURAND_RNG_PSEUDO_XORWOW));
+                    CURAND_CHECK(curandSetStream(gen, j.stream));
+                    CURAND_CHECK(curandSetPseudoRandomGeneratorSeed(gen, qmc_cfg.seed + (unsigned)salt_idx));
+                    CURAND_CHECK(curandSetGeneratorOffset(gen,
+                        (unsigned long long)(next_off[l][r] + done) * D));
+                    CURAND_CHECK(curandGenerateNormal(gen, j.d_Z, gen_count, 0.0f, 1.0f));
+                    curandDestroyGenerator(gen);
+                }
+
+                float* d_feed = j.d_Z;
+                if (mode == NoiseMode::Raw) {
+                    int blk_s = (int)((gen_count + BLOCK_SIZE - 1) / BLOCK_SIZE);
+                    kernel_scale<<<blk_s, BLOCK_SIZE, 0, j.stream>>>(j.d_Z, sqrt_hf, gen_count);
+                } else if (mode == NoiseMode::BrownianBridge) {
+                    DeviceBBData* dev_bb = bb_list[l];
+                    CUDA_CHECK(cudaMemsetAsync(j.d_W_scratch, 0,
+                        (N_fine+1)*batch*sizeof(float), j.stream));
+                    int blk = (int)(batch + BLOCK_SIZE - 1) / BLOCK_SIZE;
+                    kernel_bb_transform<<<blk, BLOCK_SIZE, 0, j.stream>>>(
+                        j.d_Z, j.d_dW, j.d_W_scratch,
+                        dev_bb->d_map_idx, dev_bb->d_left_idx, dev_bb->d_right_idx,
+                        dev_bb->d_wl, dev_bb->d_wr, dev_bb->d_std_dev,
+                        N_fine, (int)batch);
+                    d_feed = j.d_dW;
+                } else if (mode == NoiseMode::PCA) {
+                    DevicePCAData* dev_pca = pca_list[l];
+                    int blk2 = (int)((D*batch + BLOCK_SIZE - 1) / BLOCK_SIZE);
+                    kernel_cast_f32_to_f16<<<blk2, BLOCK_SIZE, 0, j.stream>>>(
+                        j.d_Z, j.d_Z_f16, (int)(D*batch));
+                    phase1_pca(j.cublas, dev_pca->d_M_pca_f16, j.d_Z_f16, j.d_dW,
+                               (int)D, (int)batch);
+                    d_feed = j.d_dW;
+                }
+
+                int blocks = (int)((batch + BLOCK_SIZE - 1) / BLOCK_SIZE);
+                kernel_mlmc_cv_gbm_asian<<<blocks, BLOCK_SIZE, 0, j.stream>>>(
+                    d_feed, j.d_sums[r], (int)batch, N_fine, N_coarse, M, h_fine, h_coarse, sqrt_hf);
+
+                done += batch;
+            }
+            next_off[l][r] += N_per_rep;
+        }
+    };
+
+    auto collect_level = [&](int l, long long N_per_rep) -> std::pair<double,double> {
+        LevelJob& j = jobs[l];
+        for (int r = 0; r < R_reps; r++)
+            CUDA_CHECK(cudaMemcpyAsync(j.h_sums[r].data(), j.d_sums[r], 4*sizeof(double),
+                                        cudaMemcpyDeviceToHost, j.stream));
+        CUDA_CHECK(cudaStreamSynchronize(j.stream));
+
+        std::vector<double> rmeans(R_reps);
+        for (int r = 0; r < R_reps; r++) rmeans[r] = j.h_sums[r][0] / N_per_rep;
+
+        double m = 0.0;
+        for (double v : rmeans) m += v;
+        m /= R_reps;
+        double v = 0.0;
+        for (double rv : rmeans) v += (rv - m) * (rv - m);
+        v = (R_reps > 1) ? v / (R_reps - 1) : 0.0;
+        return {m, v};
+    };
+
+    long long N_pilot = ml_cfg.pilot_n;
+    for (int l = 0; l <= L; l++) launch_level(l, N_pilot);
+    for (int l = 0; l <= L; l++) {
+        auto [em, vv] = collect_level(l, N_pilot);
+        E_l[l] = em; sig2_l[l] = vv * (double)N_pilot; N_l[l] = N_pilot;
+    }
+
+    bool converged = false;
+    int iter = 0;
+    while (!converged && L <= max_L && iter++ < 50) {
+        double sum_term = 0.0;
+        for (int l = 0; l <= L; l++)
+            sum_term += std::sqrt(sig2_l[l] * std::pow((double)M, l));
+
+        std::vector<long long> extra(L+1, 0);
+        for (int l = 0; l <= L; l++) {
+            double C_l = std::pow((double)M, l);
+            long long N_opt = (long long)std::ceil(
+                2.0/((double)R_reps*eps*eps) * std::sqrt(sig2_l[l]/C_l) * sum_term);
+            N_opt = std::max(N_opt, 100LL);
+            if (N_opt > N_l[l]) {
+                extra[l] = N_opt - N_l[l];
+                launch_level(l, extra[l]);
+            }
+        }
+        for (int l = 0; l <= L; l++) {
+            if (extra[l] > 0) {
+                auto [em, vv] = collect_level(l, extra[l]);
+                double wold = (double)N_l[l], wnew = (double)extra[l];
+                double sig2_new = vv * wnew;
+                E_l[l] = (E_l[l]*wold + em*wnew) / (wold + wnew);
+                sig2_l[l] = (sig2_l[l]*wold + sig2_new*wnew) / (wold + wnew);
+                N_l[l] = N_l[l] + extra[l];
+            }
+        }
+
+        double bias_est = std::abs(E_l[L]) / std::max(M - 1, 1);
+        if (L >= 1) bias_est = std::max(bias_est, std::abs(E_l[L-1]) * M / std::max(M*(M-1), 1));
+        converged = (bias_est < eps / std::sqrt(2.0));
+
+        if (!converged && L < max_L) {
+            L++;
+            launch_level(L, N_pilot);
+            auto [em, vv] = collect_level(L, N_pilot);
+            E_l[L] = em; sig2_l[L] = vv * (double)N_pilot; N_l[L] = N_pilot;
+        }
+    }
+
+    for (auto& j : jobs) {
+        if (j.d_Z) cudaFree(j.d_Z);
+        if (j.d_dW) cudaFree(j.d_dW);
+        if (j.d_W_scratch) cudaFree(j.d_W_scratch);
+        if (j.d_Z_f16) cudaFree(j.d_Z_f16);
+        if (j.cublas) cublasDestroy(j.cublas);
+        for (auto* p : j.d_sums) cudaFree(p);
+        cudaStreamDestroy(j.stream);
+    }
+
+    double price = 0.0, var_sum = 0.0;
+    long long N_total = 0;
+    for (int l = 0; l <= L; l++) {
+        price += E_l[l];
+        var_sum += sig2_l[l] / ((double)N_l[l] * (double)R_reps);
+        N_total += N_l[l] * R_reps;
+    }
+    double t_s = std::chrono::duration<double>(Clock::now() - t0).count();
+    return {price, std::sqrt(var_sum), N_total, t_s};
+}
+
+
+// ============================================================== //
+// Importance Sampling + QMC / MLMC / MLQMC (Ej. 11, GBM + call   //
+// europea). Restringido a GBM+European en las 3 funciones nuevas //
+// (igual que run_is_cuda): el shift z* es una formula analitica  //
+// especifica de esa combinacion, no tiene sentido generalizarla. //
+// ============================================================== //
+
+// run_qmc_is_cuda: adaptacion de run_qmc_cv_cuda (mismo esquema de
+// construccion de ruido Raw/BB/PCA + replicas Sobol/var_of_means), pero
+// alimentando kernel_is_gbm_dw (shift+reweight de IS) en vez de
+// kernel_gbm_asian_cv.
+MCResult run_qmc_is_cuda(const GBMParams& model, const European& payoff,
+                         double z_star, double eps, const QMCConfig& cfg,
+                         NoiseMode mode,
+                         DeviceBBData* dev_bb, DevicePCAData* dev_pca) {
+    auto t0 = Clock::now();
+
+    KernelParams kp{};
+    kp.S0 = (float)model.S0; kp.mu = (float)model.mu; kp.sigma = (float)model.sigma;
+    kp.T = (float)model.T;
+    kp.K = (float)payoff.K; kp.r = (float)payoff.r;
+    kp.discount = (float)std::exp(-payoff.r * payoff.T);
+    kp.payoff_kind = PayoffKind::European;
+
+    int n_steps = std::min(1 << 11, pow2_ceil(std::max(4, (int)std::ceil(model.T / eps))));
+    kp.z_star = (float)(z_star / std::sqrt((double)n_steps));
+    kp.h = kp.T / n_steps;
+    CUDA_CHECK(cudaMemcpyToSymbol(c_p, &kp, sizeof(kp)));
+
+    cublasHandle_t cublas = nullptr;
+    if (mode == NoiseMode::PCA) { CUBLAS_CHECK(cublasCreate(&cublas)); }
+
+    int R = cfg.R;
+    long long D = (long long)n_steps;
+
+    long long budget_floats = gpu_free_bytes() / (long long)sizeof(float);
+    long long N_per_rep = std::min<long long>(4096, std::max(512LL, budget_floats / std::max(D, 1LL)));
+    N_per_rep = pow2_floor(N_per_rep);
+
+    double var_of_means = 1e30, grand_mean = 0.0;
+    long long total_N = 0;
+    std::vector<double> rmeans(R);
+    std::vector<double*> d_sums_r(R, nullptr);
+    std::vector<long long> N_done(R, 0);
+    for (int r = 0; r < R; r++) {
+        CUDA_CHECK(cudaMalloc(&d_sums_r[r], 4*sizeof(double)));
+        CUDA_CHECK(cudaMemset(d_sums_r[r], 0, 4*sizeof(double)));
+    }
+
+    for (int doublings = 0; doublings < cfg.max_doublings; doublings++) {
+        if ((unsigned long long)N_per_rep > (unsigned long long)UINT_MAX)
+            throw std::runtime_error("run_qmc_is_cuda: N_per_rep excede el limite de 32 bits del offset de Sobol.");
+
+        long long buffers = (mode == NoiseMode::Raw) ? 1 : 3;
+        long long budget_floats_it = gpu_free_bytes() / buffers / (long long)sizeof(float);
+        long long batch_cap = std::max(2LL, budget_floats_it / std::max(D, 1LL));
+        batch_cap = std::min(batch_cap, (long long)INT_MAX / std::max(D, 1LL) / 2);
+        batch_cap = (batch_cap + 1) & ~1LL;
+
+        for (int r = 0; r < R; r++) {
+            long long done = N_done[r];
+            long long extra = N_per_rep - done;
+            double* d_sums = d_sums_r[r];
+
+            long long done_local = 0;
+            while (done_local < extra) {
+                long long batch = std::min(batch_cap, extra - done_local);
+                float* d_Z = nullptr;
+                CUDA_CHECK(cudaMalloc(&d_Z, D * batch * sizeof(float) + 2*sizeof(float)));
+
+                gen_scrambled_sobol_normal_replica(d_Z, D, batch,
+                    (unsigned long long)(done + done_local),
+                    /*replica_salt=*/cfg.seed + (unsigned)r);
+
+                float* d_dW = nullptr;
+                CUDA_CHECK(cudaMalloc(&d_dW, D * batch * sizeof(float)));
+
+                if (mode == NoiseMode::BrownianBridge && dev_bb) {
+                    float* d_W_scratch = nullptr;
+                    CUDA_CHECK(cudaMalloc(&d_W_scratch, (n_steps+1)*batch*sizeof(float)));
+                    CUDA_CHECK(cudaMemset(d_W_scratch, 0, (n_steps+1)*batch*sizeof(float)));
+                    int blkb = ((int)batch + BLOCK_SIZE - 1) / BLOCK_SIZE;
+                    kernel_bb_transform<<<blkb, BLOCK_SIZE>>>(
+                        d_Z, d_dW, d_W_scratch,
+                        dev_bb->d_map_idx, dev_bb->d_left_idx, dev_bb->d_right_idx,
+                        dev_bb->d_wl, dev_bb->d_wr, dev_bb->d_std_dev,
+                        n_steps, (int)batch);
+                    cudaFree(d_W_scratch);
+                } else if (mode == NoiseMode::PCA && dev_pca) {
+                    __half* d_Z_f16 = nullptr;
+                    CUDA_CHECK(cudaMalloc(&d_Z_f16, D * batch * sizeof(__half)));
+                    int blk2 = ((int)(D*batch)+BLOCK_SIZE-1)/BLOCK_SIZE;
+                    kernel_cast_f32_to_f16<<<blk2,BLOCK_SIZE>>>(d_Z, d_Z_f16, (int)(D*batch));
+                    phase1_pca(cublas, dev_pca->d_M_pca_f16, d_Z_f16, d_dW, (int)D, (int)batch);
+                    cudaFree(d_Z_f16);
+                } else {
+                    CUDA_CHECK(cudaMemcpy(d_dW, d_Z, D*batch*sizeof(float), cudaMemcpyDeviceToDevice));
+                    kernel_scale<<<((int)(D*batch)+BLOCK_SIZE-1)/BLOCK_SIZE,BLOCK_SIZE>>>(
+                        d_dW, sqrtf(kp.h), D*batch);
+                }
+
+                int blk = ((int)batch+BLOCK_SIZE-1)/BLOCK_SIZE;
+                kernel_is_gbm_dw<<<blk,BLOCK_SIZE>>>(d_dW, d_sums, (int)batch, n_steps, kp.h, sqrtf(kp.h));
+                CUDA_CHECK(cudaDeviceSynchronize());
+
+                cudaFree(d_dW);
+                cudaFree(d_Z);
+                done_local += batch;
+            }
+            if (extra > 0) N_done[r] = N_per_rep;
+
+            double hs[4] = {};
+            CUDA_CHECK(cudaMemcpy(hs, d_sums, 4*sizeof(double), cudaMemcpyDeviceToHost));
+            rmeans[r] = hs[0] / N_per_rep;
+        }
+
+        double m = 0.0;
+        for (double v : rmeans) m += v;
+        m /= R;
+        double v = 0.0;
+        for (double rv : rmeans) v += (rv - m)*(rv - m);
+        v = (R > 1) ? v / (R - 1) : 0.0;
+        var_of_means = v / R;
+        grand_mean = m;
+        total_N = (long long)R * N_per_rep;
+
+        if (var_of_means < eps*eps / 2.0) break;
+        N_per_rep *= 2;
+    }
+    for (int r = 0; r < R; r++) cudaFree(d_sums_r[r]);
+    if (cublas) cublasDestroy(cublas);
+
+    double t_s = std::chrono::duration<double>(Clock::now() - t0).count();
+    return {grand_mean, std::sqrt(var_of_means), total_N, t_s};
+}
+
+
+// run_mlmc_is_cuda: mismo patron de streams concurrentes por nivel que
+// run_mlmc_cuda/run_mlmc_cv_cuda, usando kernel_mlmc_is_gbm_dw alimentado con
+// dW Raw (pseudorandom, escalado con kernel_scale). z_star se reescala por
+// nivel como z_star/sqrt(N_fine) (ver comentario en kernel_mlmc_is_gbm_dw)
+// para que el desplazamiento total de la trayectoria browniana no dependa
+// del nivel.
+MCResult run_mlmc_is_cuda(const GBMParams& model, const European& payoff,
+                          double z_star, double eps, const MLMCConfig& cfg) {
+    auto t0 = Clock::now();
+
+    int M = cfg.M;
+    int max_L = cfg.max_L;
+    double T = model.T;
+
+    KernelParams kp{};
+    kp.S0 = (float)model.S0; kp.mu = (float)model.mu; kp.sigma = (float)model.sigma;
+    kp.T = (float)model.T;
+    kp.K = (float)payoff.K; kp.r = (float)payoff.r;
+    kp.discount = (float)std::exp(-payoff.r * payoff.T);
+    kp.payoff_kind = PayoffKind::European;
+    kp.M_refine = M;
+    CUDA_CHECK(cudaMemcpyToSymbol(c_p, &kp, sizeof(kp)));
+
+    int L = 2;
+    std::vector<double> E_l(max_L+1, 0.0), V_l(max_L+1, 0.0);
+    std::vector<long long> N_l(max_L+1, 0);
+
+    struct LevelJob {
+        cudaStream_t stream = nullptr;
+        curandGenerator_t gen{};
+        float* d_Z = nullptr;
+        double* d_sums = nullptr;
+        double h_sums[4] = {};
+    };
+    std::vector<LevelJob> jobs(max_L + 1);
+    for (auto& j : jobs) CUDA_CHECK(cudaStreamCreateWithFlags(&j.stream, cudaStreamNonBlocking));
+
+    auto launch_level = [&](int l, long long n_paths, unsigned seed) {
+        n_paths = (n_paths + 1) & ~1LL;
+        int N_fine = (l == 0) ? 1 : (int)std::round(std::pow(M, l));
+        int N_coarse = (l == 0) ? 0 : N_fine / M;
+        float h_fine = (float)(T / N_fine);
+        float h_coarse = (float)(T / std::max(N_coarse, 1));
+        float sqrt_hf = sqrtf(h_fine);
+        float z_star_level = (float)(z_star / std::sqrt((double)N_fine));
+        long long D = (long long)N_fine;
+
+        long long budget_floats = gpu_free_bytes() / (max_L + 1) / (long long)sizeof(float);
+        long long batch_cap = std::max(2LL, budget_floats / std::max(D, 1LL));
+        batch_cap = std::min(batch_cap, (long long)INT_MAX / 2);
+        batch_cap = (batch_cap + 1) & ~1LL;
+        batch_cap = std::min(batch_cap, n_paths);
+
+        LevelJob& j = jobs[l];
+        CUDA_CHECK(cudaMalloc(&j.d_Z, D * batch_cap * sizeof(float) + 2*sizeof(float)));
+        CUDA_CHECK(cudaMalloc(&j.d_sums, 4 * sizeof(double)));
+        CUDA_CHECK(cudaMemsetAsync(j.d_sums, 0, 4 * sizeof(double), j.stream));
+
+        CURAND_CHECK(curandCreateGenerator(&j.gen, CURAND_RNG_PSEUDO_XORWOW));
+        CURAND_CHECK(curandSetStream(j.gen, j.stream));
+        CURAND_CHECK(curandSetPseudoRandomGeneratorSeed(j.gen, seed));
+
+        long long done = 0;
+        while (done < n_paths) {
+            long long batch = std::min(batch_cap, n_paths - done);
+            long long gen_count = (D * batch + 1) & ~1LL;
+            CURAND_CHECK(curandGenerateNormal(j.gen, j.d_Z, gen_count, 0.0f, 1.0f));
+            int blk_s = (int)((gen_count + BLOCK_SIZE - 1) / BLOCK_SIZE);
+            kernel_scale<<<blk_s, BLOCK_SIZE, 0, j.stream>>>(j.d_Z, sqrt_hf, gen_count);
+            int blocks = (int)((batch + BLOCK_SIZE - 1) / BLOCK_SIZE);
+            kernel_mlmc_is_gbm_dw<<<blocks, BLOCK_SIZE, 0, j.stream>>>(
+                j.d_Z, j.d_sums, (int)batch, N_fine, N_coarse, M, h_fine, h_coarse, sqrt_hf,
+                z_star_level);
+            done += batch;
+        }
+    };
+
+    auto collect_level = [&](int l) -> std::array<double,4> {
+        LevelJob& j = jobs[l];
+        CUDA_CHECK(cudaMemcpyAsync(j.h_sums, j.d_sums, 4*sizeof(double),
+                                    cudaMemcpyDeviceToHost, j.stream));
+        CUDA_CHECK(cudaStreamSynchronize(j.stream));
+        curandDestroyGenerator(j.gen);
+        cudaFree(j.d_Z); cudaFree(j.d_sums);
+        j.d_Z = nullptr; j.d_sums = nullptr;
+        return {j.h_sums[0], j.h_sums[1], j.h_sums[2], j.h_sums[3]};
+    };
+
+    unsigned seed_ctr = cfg.seed;
+    for (int l = 0; l <= L; l++) launch_level(l, cfg.pilot_n, seed_ctr++);
+    for (int l = 0; l <= L; l++) {
+        auto s = collect_level(l);
+        long long np = cfg.pilot_n;
+        double em = s[0] / np;
+        V_l[l] = std::max(0.0, s[1]/np - em*em);
+        E_l[l] = em;
+        N_l[l] = np;
+    }
+
+    bool converged = false;
+    int iter = 0;
+    while (!converged && L <= max_L && iter++ < 50) {
+        double sum_term = 0.0;
+        for (int l = 0; l <= L; l++)
+            sum_term += std::sqrt(V_l[l] * std::pow((double)M, l));
+
+        std::vector<long long> N_opt(L+1);
+        for (int l = 0; l <= L; l++) {
+            double C_l = std::pow((double)M, l);
+            N_opt[l] = (long long)std::ceil(2.0/(eps*eps) * std::sqrt(V_l[l]/C_l) * sum_term);
+            N_opt[l] = std::max(N_opt[l], 100LL);
+        }
+
+        std::vector<long long> extra(L+1, 0);
+        for (int l = 0; l <= L; l++) {
+            if (N_opt[l] > N_l[l]) {
+                extra[l] = N_opt[l] - N_l[l];
+                launch_level(l, extra[l], seed_ctr++);
+            }
+        }
+        for (int l = 0; l <= L; l++) {
+            if (extra[l] > 0) {
+                auto s = collect_level(l);
+                long long N_new = N_l[l] + extra[l];
+                double total_sum = E_l[l] * N_l[l] + s[0];
+                double total_s2 = (V_l[l] + E_l[l]*E_l[l]) * N_l[l] + s[1];
+                E_l[l] = total_sum / N_new;
+                V_l[l] = std::max(0.0, total_s2/N_new - E_l[l]*E_l[l]);
+                N_l[l] = N_new;
+            }
+        }
+
+        double bias_est = std::abs(E_l[L]) / (M - 1);
+        if (L >= 1) bias_est = std::max(bias_est, std::abs(E_l[L-1]) * M / (M*M - M));
+        converged = (bias_est < eps / std::sqrt(2.0));
+
+        if (!converged && L < max_L) {
+            L++;
+            launch_level(L, cfg.pilot_n, seed_ctr++);
+            auto s = collect_level(L);
+            long long np = cfg.pilot_n;
+            double em = s[0] / np;
+            V_l[L] = std::max(0.0, s[1]/np - em*em);
+            E_l[L] = em;
+            N_l[L] = np;
+        }
+    }
+
+    for (auto& j : jobs) cudaStreamDestroy(j.stream);
+
+    double price = 0.0, var_sum = 0.0;
+    long long N_total = 0;
+    for (int l = 0; l <= L; l++) {
+        price += E_l[l];
+        var_sum += (N_l[l] > 0 ? V_l[l] / N_l[l] : 0.0);
+        N_total += N_l[l];
+    }
+    double t_s = std::chrono::duration<double>(Clock::now() - t0).count();
+    return {price, std::sqrt(var_sum), N_total, t_s};
+}
+
+
+// run_mlqmc_is_cuda: MLMC+IS con ruido Sobol (R réplicas) por nivel, con las
+// 3 construcciones de trayectoria (Raw/BB/PCA). Adaptación de
+// run_mlqmc_cv_cuda (mismo patrón de streams concurrentes + réplicas Sobol),
+// sustituyendo kernel_mlmc_cv_gbm_asian por kernel_mlmc_is_gbm_dw, con
+// z_star reescalado por nivel igual que en run_mlmc_is_cuda.
+MCResult run_mlqmc_is_cuda(const GBMParams& model, const European& payoff,
+                           double z_star, double eps,
+                           const MLMCConfig& ml_cfg, const QMCConfig& qmc_cfg,
+                           NoiseMode mode,
+                           std::vector<DeviceBBData*> bb_list,
+                           std::vector<DevicePCAData*> pca_list) {
+    auto t0 = Clock::now();
+
+    int M = ml_cfg.M;
+    int max_L = ml_cfg.max_L;
+    double T = model.T;
+
+    KernelParams kp{};
+    kp.S0 = (float)model.S0; kp.mu = (float)model.mu; kp.sigma = (float)model.sigma;
+    kp.T = (float)model.T;
+    kp.K = (float)payoff.K; kp.r = (float)payoff.r;
+    kp.discount = (float)std::exp(-payoff.r * payoff.T);
+    kp.payoff_kind = PayoffKind::European;
+    kp.M_refine = M;
+    CUDA_CHECK(cudaMemcpyToSymbol(c_p, &kp, sizeof(kp)));
+
+    int L = 2;
+    int R_reps = qmc_cfg.R;
+
+    std::vector<double> E_l(max_L+1, 0.0), sig2_l(max_L+1, 0.0);
+    std::vector<long long> N_l(max_L+1, 0);
+    std::vector<std::vector<long long>> next_off(max_L+1, std::vector<long long>(R_reps, 0));
+
+    struct LevelJob {
+        cudaStream_t stream = nullptr;
+        float* d_Z = nullptr;
+        long long d_Z_cap = 0;
+        float* d_dW = nullptr;
+        long long d_dW_cap = 0;
+        float* d_W_scratch = nullptr;
+        long long d_W_scratch_cap = 0;
+        __half* d_Z_f16 = nullptr;
+        long long d_Z_f16_cap = 0;
+        cublasHandle_t cublas = nullptr;
+        std::vector<double*> d_sums;
+        std::vector<std::array<double,4>> h_sums;
+    };
+    std::vector<LevelJob> jobs(max_L + 1);
+    for (auto& j : jobs) {
+        CUDA_CHECK(cudaStreamCreateWithFlags(&j.stream, cudaStreamNonBlocking));
+        j.d_sums.assign(R_reps, nullptr);
+        j.h_sums.assign(R_reps, {});
+        for (int r = 0; r < R_reps; r++) CUDA_CHECK(cudaMalloc(&j.d_sums[r], 4*sizeof(double)));
+        if (mode == NoiseMode::PCA) {
+            CUBLAS_CHECK(cublasCreate(&j.cublas));
+            CUBLAS_CHECK(cublasSetStream(j.cublas, j.stream));
+        }
+    }
+
+    auto launch_level = [&](int l, long long N_per_rep) {
+        int N_fine = (l == 0) ? 1 : (int)std::round(std::pow(M, l));
+        int N_coarse = (l == 0) ? 0 : N_fine / M;
+        float h_fine = (float)(T / N_fine);
+        float h_coarse = (float)(T / std::max(N_coarse, 1));
+        float sqrt_hf = sqrtf(h_fine);
+        float z_star_level = (float)(z_star / std::sqrt((double)N_fine));
+        long long D = (long long)N_fine;
+        bool use_sobol = (D <= D_MAX_SOBOL);
+
+        if (mode == NoiseMode::BrownianBridge) {
+            if (l >= (int)bb_list.size() || !bb_list[l])
+                throw std::runtime_error("run_mlqmc_is_cuda: falta bb_list[" + std::to_string(l)
+                    + "] (nivel " + std::to_string(l) + " no precalculado).");
+            if (bb_list[l]->N != N_fine)
+                throw std::runtime_error("run_mlqmc_is_cuda: bb_list[" + std::to_string(l)
+                    + "] tiene N=" + std::to_string(bb_list[l]->N) + ", se esperaba N_fine="
+                    + std::to_string(N_fine) + " para este nivel.");
+        }
+        if (mode == NoiseMode::PCA) {
+            if (l >= (int)pca_list.size() || !pca_list[l])
+                throw std::runtime_error("run_mlqmc_is_cuda: falta pca_list[" + std::to_string(l)
+                    + "] (nivel " + std::to_string(l) + " no precalculado).");
+            if (pca_list[l]->m != N_fine)
+                throw std::runtime_error("run_mlqmc_is_cuda: pca_list[" + std::to_string(l)
+                    + "] tiene m=" + std::to_string(pca_list[l]->m) + ", se esperaba N_fine="
+                    + std::to_string(N_fine) + " para este nivel.");
+        }
+
+        long long buffers_por_nivel = (mode == NoiseMode::Raw) ? 1 : 3;
+        long long budget_floats = gpu_free_bytes() / (max_L + 1) / buffers_por_nivel
+                                 / (long long)sizeof(float);
+        long long batch_cap = std::max(2LL, budget_floats / std::max(D, 1LL));
+        batch_cap = std::min(batch_cap, (long long)INT_MAX / 2);
+        batch_cap = (batch_cap + 1) & ~1LL;
+        batch_cap = std::min(batch_cap, N_per_rep);
+
+        LevelJob& j = jobs[l];
+        long long need = D * batch_cap + 2;
+        if (need > j.d_Z_cap) {
+            if (j.d_Z) cudaFree(j.d_Z);
+            CUDA_CHECK(cudaMalloc(&j.d_Z, need * sizeof(float)));
+            j.d_Z_cap = need;
+        }
+        if (mode == NoiseMode::BrownianBridge) {
+            if (D * batch_cap > j.d_dW_cap) {
+                if (j.d_dW) cudaFree(j.d_dW);
+                CUDA_CHECK(cudaMalloc(&j.d_dW, D * batch_cap * sizeof(float)));
+                j.d_dW_cap = D * batch_cap;
+            }
+            long long scratch_need = (N_fine + 1) * batch_cap;
+            if (scratch_need > j.d_W_scratch_cap) {
+                if (j.d_W_scratch) cudaFree(j.d_W_scratch);
+                CUDA_CHECK(cudaMalloc(&j.d_W_scratch, scratch_need * sizeof(float)));
+                j.d_W_scratch_cap = scratch_need;
+            }
+        } else if (mode == NoiseMode::PCA) {
+            if (D * batch_cap > j.d_dW_cap) {
+                if (j.d_dW) cudaFree(j.d_dW);
+                CUDA_CHECK(cudaMalloc(&j.d_dW, D * batch_cap * sizeof(float)));
+                j.d_dW_cap = D * batch_cap;
+            }
+            if (D * batch_cap > j.d_Z_f16_cap) {
+                if (j.d_Z_f16) cudaFree(j.d_Z_f16);
+                CUDA_CHECK(cudaMalloc(&j.d_Z_f16, D * batch_cap * sizeof(__half)));
+                j.d_Z_f16_cap = D * batch_cap;
+            }
+        }
+
+        for (int r = 0; r < R_reps; r++) {
+            unsigned long long salt_idx = (unsigned long long)l * (unsigned long long)R_reps + (unsigned long long)r;
+
+            if (use_sobol && (unsigned long long)(next_off[l][r] + N_per_rep) > (unsigned long long)UINT_MAX)
+                throw std::runtime_error("run_mlqmc_is_cuda: nivel " + std::to_string(l)
+                    + ", replica " + std::to_string(r) + ": offset "
+                    + std::to_string(next_off[l][r] + N_per_rep)
+                    + " excede el limite de 32 bits del offset de Sobol.");
+
+            CUDA_CHECK(cudaMemsetAsync(j.d_sums[r], 0, 4*sizeof(double), j.stream));
+
+            long long done = 0;
+            while (done < N_per_rep) {
+                long long batch = std::min(batch_cap, N_per_rep - done);
+                long long gen_count = (D * batch + 1) & ~1LL;
+
+                if (use_sobol) {
+                    gen_scrambled_sobol_normal_replica(j.d_Z, D, batch,
+                        (unsigned long long)(next_off[l][r] + done),
+                        /*replica_salt=*/qmc_cfg.seed + (unsigned)salt_idx, j.stream);
+                } else {
+                    curandGenerator_t gen;
+                    CURAND_CHECK(curandCreateGenerator(&gen, CURAND_RNG_PSEUDO_XORWOW));
+                    CURAND_CHECK(curandSetStream(gen, j.stream));
+                    CURAND_CHECK(curandSetPseudoRandomGeneratorSeed(gen, qmc_cfg.seed + (unsigned)salt_idx));
+                    CURAND_CHECK(curandSetGeneratorOffset(gen,
+                        (unsigned long long)(next_off[l][r] + done) * D));
+                    CURAND_CHECK(curandGenerateNormal(gen, j.d_Z, gen_count, 0.0f, 1.0f));
+                    curandDestroyGenerator(gen);
+                }
+
+                float* d_feed = j.d_Z;
+                if (mode == NoiseMode::Raw) {
+                    int blk_s = (int)((gen_count + BLOCK_SIZE - 1) / BLOCK_SIZE);
+                    kernel_scale<<<blk_s, BLOCK_SIZE, 0, j.stream>>>(j.d_Z, sqrt_hf, gen_count);
+                } else if (mode == NoiseMode::BrownianBridge) {
+                    DeviceBBData* dev_bb = bb_list[l];
+                    CUDA_CHECK(cudaMemsetAsync(j.d_W_scratch, 0,
+                        (N_fine+1)*batch*sizeof(float), j.stream));
+                    int blk = (int)(batch + BLOCK_SIZE - 1) / BLOCK_SIZE;
+                    kernel_bb_transform<<<blk, BLOCK_SIZE, 0, j.stream>>>(
+                        j.d_Z, j.d_dW, j.d_W_scratch,
+                        dev_bb->d_map_idx, dev_bb->d_left_idx, dev_bb->d_right_idx,
+                        dev_bb->d_wl, dev_bb->d_wr, dev_bb->d_std_dev,
+                        N_fine, (int)batch);
+                    d_feed = j.d_dW;
+                } else if (mode == NoiseMode::PCA) {
+                    DevicePCAData* dev_pca = pca_list[l];
+                    int blk2 = (int)((D*batch + BLOCK_SIZE - 1) / BLOCK_SIZE);
+                    kernel_cast_f32_to_f16<<<blk2, BLOCK_SIZE, 0, j.stream>>>(
+                        j.d_Z, j.d_Z_f16, (int)(D*batch));
+                    phase1_pca(j.cublas, dev_pca->d_M_pca_f16, j.d_Z_f16, j.d_dW,
+                               (int)D, (int)batch);
+                    d_feed = j.d_dW;
+                }
+
+                int blocks = (int)((batch + BLOCK_SIZE - 1) / BLOCK_SIZE);
+                kernel_mlmc_is_gbm_dw<<<blocks, BLOCK_SIZE, 0, j.stream>>>(
+                    d_feed, j.d_sums[r], (int)batch, N_fine, N_coarse, M, h_fine, h_coarse, sqrt_hf,
+                    z_star_level);
+
+                done += batch;
+            }
+            next_off[l][r] += N_per_rep;
+        }
+    };
+
+    auto collect_level = [&](int l, long long N_per_rep) -> std::pair<double,double> {
+        LevelJob& j = jobs[l];
+        for (int r = 0; r < R_reps; r++)
+            CUDA_CHECK(cudaMemcpyAsync(j.h_sums[r].data(), j.d_sums[r], 4*sizeof(double),
+                                        cudaMemcpyDeviceToHost, j.stream));
+        CUDA_CHECK(cudaStreamSynchronize(j.stream));
+
+        std::vector<double> rmeans(R_reps);
+        for (int r = 0; r < R_reps; r++) rmeans[r] = j.h_sums[r][0] / N_per_rep;
+
+        double m = 0.0;
+        for (double v : rmeans) m += v;
+        m /= R_reps;
+        double v = 0.0;
+        for (double rv : rmeans) v += (rv - m) * (rv - m);
+        v = (R_reps > 1) ? v / (R_reps - 1) : 0.0;
+        return {m, v};
+    };
+
+    long long N_pilot = ml_cfg.pilot_n;
+    for (int l = 0; l <= L; l++) launch_level(l, N_pilot);
+    for (int l = 0; l <= L; l++) {
+        auto [em, vv] = collect_level(l, N_pilot);
+        E_l[l] = em; sig2_l[l] = vv * (double)N_pilot; N_l[l] = N_pilot;
+    }
+
+    bool converged = false;
+    int iter = 0;
+    while (!converged && L <= max_L && iter++ < 50) {
+        double sum_term = 0.0;
+        for (int l = 0; l <= L; l++)
+            sum_term += std::sqrt(sig2_l[l] * std::pow((double)M, l));
+
+        std::vector<long long> extra(L+1, 0);
+        for (int l = 0; l <= L; l++) {
+            double C_l = std::pow((double)M, l);
+            long long N_opt = (long long)std::ceil(
+                2.0/((double)R_reps*eps*eps) * std::sqrt(sig2_l[l]/C_l) * sum_term);
+            N_opt = std::max(N_opt, 100LL);
+            if (N_opt > N_l[l]) {
+                extra[l] = N_opt - N_l[l];
+                launch_level(l, extra[l]);
+            }
+        }
+        for (int l = 0; l <= L; l++) {
+            if (extra[l] > 0) {
+                auto [em, vv] = collect_level(l, extra[l]);
+                double wold = (double)N_l[l], wnew = (double)extra[l];
+                double sig2_new = vv * wnew;
+                E_l[l] = (E_l[l]*wold + em*wnew) / (wold + wnew);
+                sig2_l[l] = (sig2_l[l]*wold + sig2_new*wnew) / (wold + wnew);
+                N_l[l] = N_l[l] + extra[l];
+            }
+        }
+
+        double bias_est = std::abs(E_l[L]) / std::max(M - 1, 1);
+        if (L >= 1) bias_est = std::max(bias_est, std::abs(E_l[L-1]) * M / std::max(M*(M-1), 1));
+        converged = (bias_est < eps / std::sqrt(2.0));
+
+        if (!converged && L < max_L) {
+            L++;
+            launch_level(L, N_pilot);
+            auto [em, vv] = collect_level(L, N_pilot);
+            E_l[L] = em; sig2_l[L] = vv * (double)N_pilot; N_l[L] = N_pilot;
+        }
+    }
+
+    for (auto& j : jobs) {
+        if (j.d_Z) cudaFree(j.d_Z);
+        if (j.d_dW) cudaFree(j.d_dW);
+        if (j.d_W_scratch) cudaFree(j.d_W_scratch);
+        if (j.d_Z_f16) cudaFree(j.d_Z_f16);
+        if (j.cublas) cublasDestroy(j.cublas);
+        for (auto* p : j.d_sums) cudaFree(p);
+        cudaStreamDestroy(j.stream);
+    }
+
+    double price = 0.0, var_sum = 0.0;
+    long long N_total = 0;
+    for (int l = 0; l <= L; l++) {
+        price += E_l[l];
+        var_sum += sig2_l[l] / ((double)N_l[l] * (double)R_reps);
+        N_total += N_l[l] * R_reps;
+    }
+    double t_s = std::chrono::duration<double>(Clock::now() - t0).count();
+    return {price, std::sqrt(var_sum), N_total, t_s};
+}
 // Método público de run_mc_fixed_impl (utilizado desde los ejemplos vía SimFn)
 std::pair<double, double> run_mc_fixed(const ModelVariant& model,
                                        const PayoffVariant& payoff,
                                        int n_steps, long long n_paths,
                                        unsigned seed) {
     return run_mc_fixed_impl(model, payoff, n_steps, n_paths, seed);
+}
+
+
+// ------------------------------------------------------------- //
+// Barrido de precision con corte por metodo                      //
+// ------------------------------------------------------------- //
+
+std::vector<double> eps_scale_125(double eps_finest) {
+    // Escala redonda 1-2-5 descendente, empezando en 0.05.
+    static const double BASE[] = {
+        0.05, 0.02, 0.01,
+        0.005, 0.002, 0.001,
+        0.0005, 0.0002, 0.0001,
+        0.00005, 0.00002, 0.00001
+    };
+    std::vector<double> out;
+    for (double e : BASE) {
+        if (e < eps_finest - 1e-15) break; // ya pasamos el limite pedido
+        out.push_back(e);
+    }
+    if (out.empty() || (out.back() - eps_finest) > 1e-15 * std::max(1.0, eps_finest)) {
+        // El usuario pidio un eps_finest mas fino que el ultimo de la escala
+        // predefinida (o esta vacia): anadimos ese punto final explicitamente
+        // para no dejar de intentar la precision solicitada.
+        out.push_back(eps_finest);
+    }
+    return out;
+}
+
+void run_precision_sweep(const std::string& example_name,
+                         std::vector<SweepMethod>& methods,
+                         double price_ref,
+                         const std::vector<double>& eps_list,
+                         double T_BUDGET_S,
+                         int R_MAX,
+                         int R_MIN,
+                         double SE_REL) {
+
+    mc_println("\n{}", std::string(78, '#'));
+    mc_println("### {}", example_name);
+    mc_println("{}", std::string(78, '#'));
+
+    std::vector<bool> cut(methods.size(), false);
+    // Coste de una corrida individual en el ultimo eps donde el metodo se ejecuto,
+    // para proyectar el del siguiente eps (todos los metodos son >= O(eps^-2), asi
+    // que eps^-2 es cota superior de la extrapolacion) y no pagar una corrida de
+    // sondeo carisima solo para cortarla despues.
+    std::vector<double> last_run_s(methods.size(), 0.0);
+    std::vector<double> last_run_eps(methods.size(), 0.0);
+    std::vector<std::string> proj_all;
+
+    for (size_t lvl = 0; lvl < eps_list.size(); ++lvl) {
+        double eps = eps_list[lvl];
+        auto t_lvl0 = Clock::now();
+
+        std::vector<TableRow>   rows;
+        std::vector<std::string> cut_names;
+        std::vector<std::string> na_names;
+
+        std::vector<std::string> proj_names;
+        for (size_t mi = 0; mi < methods.size(); ++mi) {
+            if (cut[mi]) continue;
+            SweepMethod& mth = methods[mi];
+
+            // Proyeccion: si la corrida de sondeo ya se preve por encima del
+            // presupuesto, no se ejecuta; el metodo sale -- aqui y en los eps mas finos.
+            if (last_run_s[mi] > 0.0) {
+                double ratio = last_run_eps[mi] / eps;
+                double proj  = last_run_s[mi] * ratio * ratio;
+                if (proj > T_BUDGET_S) {
+                    cut[mi] = true;
+                    proj_names.push_back(mth.name);
+                    continue;
+                }
+            }
+
+            // Presupuesto: se mide SOLO esta primera corrida individual.
+            MCResult r0;
+            try {
+                r0 = mth.run_once(0u, eps);
+            } catch (const SobolLimitReached&) {
+                // El metodo necesitaria mas de 2^32 puntos Sobol por replica a
+                // este eps: no aplicable. Se marca con -- y se corta para los
+                // niveles mas finos (que solo empeoran).
+                cut[mi] = true;
+                na_names.push_back(mth.name);
+                continue;
+            }
+            if (r0.time_s > T_BUDGET_S) {
+                cut[mi] = true;
+                cut_names.push_back(mth.name);
+                continue;
+            }
+
+            // Dentro de presupuesto: repetir con semilla distinta hasta R_MAX
+            // veces, parando en cuanto el tiempo acumulado supera T_BUDGET_S.
+            RunningStats price_stats;
+            price_stats.update(r0.price);
+            double    time_total = r0.time_s;
+            long long n_last     = r0.n_samples;
+            double    se_last    = r0.std_error;
+            int       R_done     = 1;
+
+            for (int rep = 1; rep < R_MAX; ++rep) {
+                if (time_total > T_BUDGET_S) break; // presupuesto = tope de tiempo total del metodo en este nivel
+                // Criterio adaptativo: parar cuando el error estandar de la media
+                // entre repeticiones cae por debajo de SE_REL * |media|, con un
+                // minimo de R_MIN repeticiones para que la stddev tenga sentido.
+                if (R_done >= R_MIN &&
+                    price_stats.std_error() < SE_REL * std::abs(price_stats.mean)) break;
+                MCResult r;
+                try { r = mth.run_once((unsigned)rep * 977u, eps); }
+                catch (const SobolLimitReached&) { break; }
+                price_stats.update(r.price);
+                time_total += r.time_s;
+                n_last  = r.n_samples;
+                se_last = r.std_error;
+                ++R_done;
+            }
+
+            double price = price_stats.mean;
+            double se    = (R_done > 1) ? price_stats.std_error() : se_last;
+            rows.push_back({mth.name, price, se, n_last, time_total, R_done});
+            last_run_s[mi] = r0.time_s; last_run_eps[mi] = eps;
+            mc_println("    [nivel {}] {} listo: {:.1f}s totales, {} reps", lvl, mth.name, time_total, R_done);
+        }
+
+        double wall = std::chrono::duration<double>(Clock::now() - t_lvl0).count();
+
+        mc_println("--- nivel {} eps={} wall={:.3f}s ---", lvl, eps, wall);
+        mc_println("  Referencia: {:.6f}", price_ref);
+        mc_println("  {:<22}{:>10}{:>10}{:>12}{:>9}{:>10}{:>6}{:>5}",
+                     "Metodo", "Precio", "StdErr", "N", "T(s)", "|Error|", "OK?", "R");
+        mc_println("  {}", std::string(84, '-'));
+        for (const auto& r : rows) {
+            double err = std::abs(r.price - price_ref);
+            bool   ok  = (err < 2.0 * eps);
+            mc_println("  {:<22}{:>10.4f}{:>10.4f}{:>12}{:>9.3f}{:>10.4f}{:>6}{:>5}",
+                         r.method, r.price, r.std_error, r.n_samples,
+                         r.time_s, err, ok ? "SI" : "NO", r.n_reps);
+        }
+        for (const auto& nm : cut_names) {
+            mc_println("  {:<22}--  (una corrida supero el presupuesto de {:.0f}s; cortado aqui y en los eps mas finos)",
+                         nm, T_BUDGET_S);
+        }
+        for (const auto& nm : na_names) {
+            mc_println("  {:<22}--  (necesitaria > 2^32 puntos Sobol por replica a este eps)", nm);
+        }
+        for (const auto& nm : proj_names) {
+            mc_println("  {:<22}--  (coste proyectado > {:.0f}s; no ejecutado, cortado aqui y en los eps mas finos)", nm, T_BUDGET_S);
+        }
+        mc_println("");
+
+        bool all_cut = true;
+        for (bool b : cut) if (!b) { all_cut = false; break; }
+        if (all_cut) break;
+    }
 }

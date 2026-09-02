@@ -17,6 +17,7 @@ row_re = re.compile(r"^\s{2}(.+?)\s+([\d.]+)\s+([\d.]+)\s+(\d+)\s+([\d.]+)\s+([\
 # Fallback: StdErr y N pegados cuando N desborda la columna {:>12} de print_table.
 # StdErr sale como D.DDDD (4 decimales), el resto de digitos es N.
 merged_re = re.compile(r"^\s{2}(.+?)\s+([\d.]+)\s+(\d+\.\d{4})(\d+)\s+([\d.]+)\s+([\d.]+)\s+(SI|NO)\s*$")
+cut_row_re = re.compile(r"^\s{2}(\S.*?)\s+--\s+\((.+)\)\s*$")
 
 examples = []
 cur_ex = cur_levels = cur_level = None
@@ -32,6 +33,10 @@ for ln in lines:
         cur_levels.append(cur_level); continue
     m = ref_re.search(ln)
     if m and cur_level is not None: cur_level["ref"] = float(m.group(1)); continue
+    m = cut_row_re.match(ln)
+    if m and cur_level is not None:
+        cur_level["rows"].append({"metodo": m.group(1).strip(), "cut": m.group(2).strip()})
+        continue
     m = row_re.match(ln) or merged_re.match(ln)
     if m and cur_level is not None:
         cur_level["rows"].append({
@@ -59,6 +64,9 @@ for name, levels in examples:
         out.append(HDR)
         out.append("  " + "-" * (len(HDR) - 2))
         for r in lv["rows"]:
+            if "cut" in r:
+                out.append(f"  {r['metodo']:<16}{'--':>11}   ({r['cut']})")
+                continue
             mse = r["err"]**2 + r["stderr"]**2
             flag = "" if r["err"] <= 1.0 else "  <-- corrida rota (pre-crash)"
             out.append(

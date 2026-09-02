@@ -18,7 +18,8 @@ lvl_re  = re.compile(r"^--- nivel \d+\s+eps=([\d.eE+-]+)\s+wall=([\d.]+)s ---")
 cut_re  = re.compile(r"CORTADO|supero el presupuesto")
 ref_re  = re.compile(r"Referencia:\s*([\d.]+)")
 # fila de metodo: nombre (puede tener espacios) + 6 columnas + OK
-row_re  = re.compile(r"^\s{2}(.+?)\s+([\d.]+)\s+([\d.]+)\s+(\d+)\s+([\d.]+)\s+([\d.]+)\s+(SI|NO)\s*$")
+row_re  = re.compile(r"^\s{2}(.+?)\s+([\d.]+)\s+([\d.]+)\s+(\d+)\s+([\d.]+)\s+([\d.]+)\s+(SI|NO)(?:\s+(\d+))?\s*$")
+cut_row_re = re.compile(r"^\s{2}(\S.*?)\s+--\s+\((.+)\)\s*$")
 
 for ln in lines:
     m = ex_re.match(ln)
@@ -37,6 +38,10 @@ for ln in lines:
     m = ref_re.search(ln)
     if m and cur_level is not None:
         cur_level["ref"] = float(m.group(1))
+        continue
+    m = cut_row_re.match(ln)
+    if m and cur_level is not None:
+        cur_level["rows"][m.group(1).strip()] = {"cut": m.group(2).strip()}
         continue
     m = row_re.match(ln)
     if m and cur_level is not None:
@@ -74,7 +79,7 @@ for name, levels in examples:
     out.append("#" * 78)
 
     # cabecera de eps
-    hdr = f"{'metodo \\ eps':<16}" + "".join(f"{e:>10}" for e in epss)
+    hdr = f"{'metodo / eps':<16}" + "".join(f"{e:>10}" for e in epss)
     out.append(hdr)
     out.append("-" * len(hdr))
     # matriz de |Error|  (marca *** los puntos basura |err|>1, p.ej. corrida rota pre-crash)
@@ -82,7 +87,7 @@ for name, levels in examples:
         cells = []
         for lv in levels:
             r = lv["rows"].get(mth)
-            if not r:
+            if not r or "cut" in r:
                 cells.append(f"{'--':>10}")
             elif r["err"] > 1.0:
                 cells.append(f"{'***':>10}")
@@ -96,7 +101,7 @@ for name, levels in examples:
     mc_key = next((k for k in methods if k.strip() in ("MC", "MC (Dupire)", "MC (plain)")), None)
     if mc_key:
         out.append(f"{'N(MC) [millones]':<16}" + "".join(
-            f"{(lv['rows'][mc_key]['N']/1e6 if mc_key in lv['rows'] else 0):>10.2f}" for lv in levels))
+            f"{(lv['rows'][mc_key]['N']/1e6 if (mc_key in lv['rows'] and 'N' in lv['rows'][mc_key]) else 0):>10.2f}" for lv in levels))
     out.append("")
 
 out.append("=" * 78)
