@@ -1,0 +1,116 @@
+
+##############################################################################
+### ejemplo10_dupire_cv
+##############################################################################
+    [nivel 0] MC (Dupire) listo: 0.1s totales, 10 reps
+    [nivel 0] MC + CV (GBM) listo: 0.0s totales, 10 reps
+    [nivel 0] QMC + CV (GBM) listo: 0.1s totales, 10 reps
+    [nivel 0] MLMC listo: 0.1s totales, 10 reps
+--- nivel 0 eps=0.05 wall=0.294s ---
+  Referencia: 8.943956
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MC (Dupire)               8.9617    0.0116      104736    0.057    0.0177    SI   10
+  MC + CV (GBM)             8.9589    0.0072       10000    0.015    0.0149    SI   10
+  QMC + CV (GBM)            8.9536    0.0008      131072    0.088    0.0097    SI   10
+  MLMC                      8.9139    0.0143      284430    0.118    0.0301    SI   10
+
+    [nivel 1] MC (Dupire) listo: 0.3s totales, 10 reps
+    [nivel 1] MC + CV (GBM) listo: 0.0s totales, 10 reps
+    [nivel 1] QMC + CV (GBM) listo: 0.1s totales, 10 reps
+    [nivel 1] MLMC listo: 0.2s totales, 10 reps
+--- nivel 1 eps=0.02 wall=0.624s ---
+  Referencia: 8.943956
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MC (Dupire)               8.9442    0.0039      641746    0.275    0.0002    SI   10
+  MC + CV (GBM)             8.9443    0.0054       23032    0.020    0.0003    SI   10
+  QMC + CV (GBM)            8.9423    0.0009      131072    0.145    0.0017    SI   10
+  MLMC                      8.9340    0.0051     1873448    0.164    0.0100    SI   10
+
+    [nivel 2] MC (Dupire) listo: 1.7s totales, 10 reps
+    [nivel 2] MC + CV (GBM) listo: 0.0s totales, 10 reps
+    [nivel 2] QMC + CV (GBM) listo: 0.2s totales, 10 reps
+    [nivel 2] MLMC listo: 0.2s totales, 10 reps
+--- nivel 2 eps=0.01 wall=2.220s ---
+  Referencia: 8.943956
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MC (Dupire)               8.9340    0.0019     2622590    1.732    0.0100    SI   10
+  MC + CV (GBM)             8.9358    0.0019       87838    0.035    0.0082    SI   10
+  QMC + CV (GBM)            8.9367    0.0008      131072    0.184    0.0073    SI   10
+  MLMC                      8.9342    0.0016     7801463    0.228    0.0098    SI   10
+
+    [nivel 3] MC (Dupire) listo: 10.0s totales, 10 reps
+    [nivel 3] MC + CV (GBM) listo: 0.1s totales, 10 reps
+    [nivel 3] QMC + CV (GBM) listo: 0.7s totales, 10 reps
+    [nivel 3] MLMC listo: 0.6s totales, 10 reps
+--- nivel 3 eps=0.005 wall=11.390s ---
+  Referencia: 8.943956
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MC (Dupire)               8.9347    0.0012    10184448    9.960    0.0092    SI   10
+  MC + CV (GBM)             8.9325    0.0011      360586    0.109    0.0114    NO   10
+  QMC + CV (GBM)            8.9331    0.0012      131072    0.689    0.0108    NO   10
+  MLMC                      8.9313    0.0013    32548027    0.572    0.0127    NO   10
+
+    [nivel 4] MC (Dupire) listo: 25.8s totales, 2 reps
+    [nivel 4] MC + CV (GBM) listo: 0.9s totales, 10 reps
+    [nivel 4] QMC + CV (GBM) listo: 2.3s totales, 10 reps
+    [nivel 4] MLMC listo: 0.8s totales, 10 reps
+--- nivel 4 eps=0.002 wall=29.857s ---
+  Referencia: 8.943956
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MC (Dupire)               8.9344    0.0003    62516500   25.820    0.0096    NO    2
+  MC + CV (GBM)             8.9325    0.0005     2350796    0.862    0.0115    NO   10
+  QMC + CV (GBM)            8.9324    0.0003     1048576    2.324    0.0116    NO   10
+  MLMC                      8.9325    0.0003   203338582    0.766    0.0115    NO   10
+
+    [nivel 5] MC + CV (GBM) listo: 6.2s totales, 10 reps
+    [nivel 5] QMC + CV (GBM) listo: 11.4s totales, 10 reps
+    [nivel 5] MLMC listo: 1.8s totales, 10 reps
+--- nivel 5 eps=0.001 wall=19.563s ---
+  Referencia: 8.943956
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MC + CV (GBM)             8.9320    0.0002     9071616    6.184    0.0120    NO   10
+  QMC + CV (GBM)            8.9319    0.0003     2097152   11.419    0.0121    NO   10
+  MLMC                      8.9326    0.0002   813525430    1.776    0.0113    NO   10
+  MC (Dupire)           --  (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+    [nivel 6] MC + CV (GBM) listo: 22.1s totales, 9 reps
+    [nivel 6] QMC + CV (GBM) listo: 22.1s totales, 7 reps
+    [nivel 6] MLMC listo: 5.0s totales, 10 reps
+--- nivel 6 eps=5e-04 wall=49.343s ---
+  Referencia: 8.943956
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MC + CV (GBM)             8.9320    0.0001    36959432   22.134    0.0120    NO    9
+  QMC + CV (GBM)            8.9318    0.0000     8388608   22.100    0.0121    NO    7
+  MLMC                      8.9326    0.0001  3253508918    5.010    0.0113    NO   10
+
+    [nivel 7] MC + CV (GBM) listo: 30.4s totales, 2 reps
+    [nivel 7] MLMC listo: 19.5s totales, 10 reps
+--- nivel 7 eps=2e-04 wall=77.328s ---
+  Referencia: 8.943956
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MC + CV (GBM)             8.9318    0.0001   229579382   30.413    0.0121    NO    2
+  MLMC                      8.9325    0.0000 20333572175   19.461    0.0115    NO   10
+  QMC + CV (GBM)        --  (una corrida supero el presupuesto de 20s; cortado aqui y en los eps mas finos)
+
+    [nivel 8] MLMC listo: 22.4s totales, 3 reps
+--- nivel 8 eps=1e-04 wall=22.352s ---
+  Referencia: 8.943956
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MLMC                      8.9325    0.0000 81473653080   22.352    0.0115    NO    3
+  MC + CV (GBM)         --  (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+--- nivel 9 eps=5e-05 wall=0.000s ---
+  Referencia: 8.943956
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MLMC                  --  (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+

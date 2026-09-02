@@ -1,0 +1,231 @@
+
+##############################################################################
+### ejemplo06_dupire
+##############################################################################
+    [nivel 0] MC listo: 0.0s totales, 10 reps
+    [nivel 0] MLMC listo: 0.1s totales, 10 reps
+    [nivel 0] QMC Raw listo: 0.1s totales, 10 reps
+    [nivel 0] QMC BB listo: 0.1s totales, 10 reps
+    [nivel 0] QMC PCA listo: 0.2s totales, 10 reps
+    [nivel 0] MLQMC Raw listo: 0.1s totales, 10 reps
+    [nivel 0] MLQMC BB listo: 0.1s totales, 10 reps
+    [nivel 0] MLQMC PCA listo: 0.1s totales, 10 reps
+--- nivel 0 eps=0.05 wall=0.910s ---
+  Referencia: 8.943956
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MC                        8.9617    0.0116      104736    0.033    0.0177    SI   10
+  MLMC                      8.9139    0.0143      284430    0.099    0.0301    SI   10
+  QMC Raw                   8.9528    0.0017      131072    0.083    0.0089    SI   10
+  QMC BB                    8.9514    0.0001      131072    0.143    0.0075    SI   10
+  QMC PCA                   8.9517    0.0002      131072    0.185    0.0077    SI   10
+  MLQMC Raw                 8.9442    0.0012      102400    0.093    0.0003    SI   10
+  MLQMC BB                  8.9415    0.0011      102400    0.132    0.0025    SI   10
+  MLQMC PCA                 8.9404    0.0015      102400    0.141    0.0035    SI   10
+
+    [nivel 1] MC listo: 0.3s totales, 10 reps
+    [nivel 1] MLMC listo: 0.1s totales, 10 reps
+    [nivel 1] QMC Raw listo: 0.1s totales, 10 reps
+    [nivel 1] QMC BB listo: 0.2s totales, 10 reps
+    [nivel 1] QMC PCA listo: 0.2s totales, 10 reps
+    [nivel 1] MLQMC Raw listo: 0.1s totales, 10 reps
+    [nivel 1] MLQMC BB listo: 0.2s totales, 10 reps
+    [nivel 1] MLQMC PCA listo: 0.2s totales, 10 reps
+--- nivel 1 eps=0.02 wall=1.404s ---
+  Referencia: 8.943956
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MC                        8.9442    0.0039      641746    0.259    0.0002    SI   10
+  MLMC                      8.9340    0.0051     1873448    0.143    0.0100    SI   10
+  QMC Raw                   8.9434    0.0010      131072    0.141    0.0006    SI   10
+  QMC BB                    8.9413    0.0001      131072    0.216    0.0026    SI   10
+  QMC PCA                   8.9417    0.0003      131072    0.152    0.0023    SI   10
+  MLQMC Raw                 8.9385    0.0013      116032    0.129    0.0054    SI   10
+  MLQMC BB                  8.9373    0.0016      115200    0.192    0.0067    SI   10
+  MLQMC PCA                 8.9346    0.0022      115200    0.171    0.0093    SI   10
+
+    [nivel 2] MC listo: 1.3s totales, 10 reps
+    [nivel 2] MLMC listo: 0.2s totales, 10 reps
+    [nivel 2] QMC Raw listo: 0.2s totales, 10 reps
+    [nivel 2] QMC BB listo: 0.3s totales, 10 reps
+    [nivel 2] QMC PCA listo: 0.2s totales, 10 reps
+    [nivel 2] MLQMC Raw listo: 0.3s totales, 10 reps
+    [nivel 2] MLQMC BB listo: 0.4s totales, 10 reps
+    [nivel 2] MLQMC PCA listo: 0.3s totales, 10 reps
+--- nivel 2 eps=0.01 wall=3.263s ---
+  Referencia: 8.943956
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MC                        8.9340    0.0019     2622590    1.295    0.0100    SI   10
+  MLMC                      8.9342    0.0016     7801463    0.237    0.0098    SI   10
+  QMC Raw                   8.9314    0.0014      131072    0.179    0.0126    SI   10
+  QMC BB                    8.9363    0.0001      131072    0.305    0.0076    SI   10
+  QMC PCA                   8.9364    0.0003      131072    0.242    0.0075    SI   10
+  MLQMC Raw                 8.9345    0.0011      296800    0.277    0.0095    SI   10
+  MLQMC BB                  8.9338    0.0006      198016    0.374    0.0101    SI   10
+  MLQMC PCA                 8.9326    0.0009      267648    0.349    0.0114    SI   10
+
+    [nivel 3] MC listo: 9.8s totales, 10 reps
+    [nivel 3] MLMC listo: 0.5s totales, 10 reps
+    [nivel 3] QMC Raw listo: 1.4s totales, 10 reps
+    [nivel 3] QMC BB listo: 0.5s totales, 10 reps
+    [nivel 3] QMC PCA listo: 0.3s totales, 10 reps
+    [nivel 3] MLQMC Raw listo: 0.5s totales, 10 reps
+    [nivel 3] MLQMC BB listo: 0.8s totales, 10 reps
+    [nivel 3] MLQMC PCA listo: 0.6s totales, 10 reps
+--- nivel 3 eps=0.005 wall=14.572s ---
+  Referencia: 8.943956
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MC                        8.9347    0.0012    10184448    9.850    0.0092    SI   10
+  MLMC                      8.9313    0.0013    32548027    0.532    0.0127    NO   10
+  QMC Raw                   8.9331    0.0010      524288    1.439    0.0109    NO   10
+  QMC BB                    8.9338    0.0001      131072    0.462    0.0102    NO   10
+  QMC PCA                   8.9342    0.0003      131072    0.326    0.0098    SI   10
+  MLQMC Raw                 8.9320    0.0004      807424    0.519    0.0119    NO   10
+  MLQMC BB                  8.9329    0.0004      599136    0.795    0.0111    NO   10
+  MLQMC PCA                 8.9319    0.0005      687136    0.632    0.0121    NO   10
+
+    [nivel 4] MC listo: 25.7s totales, 2 reps
+    [nivel 4] MLMC listo: 1.0s totales, 10 reps
+    [nivel 4] QMC Raw listo: 4.8s totales, 10 reps
+    [nivel 4] QMC BB listo: 1.4s totales, 10 reps
+    [nivel 4] QMC PCA listo: 0.6s totales, 10 reps
+    [nivel 4] MLQMC Raw listo: 2.9s totales, 10 reps
+    [nivel 4] MLQMC BB listo: 3.0s totales, 10 reps
+    [nivel 4] MLQMC PCA listo: 3.5s totales, 10 reps
+--- nivel 4 eps=0.002 wall=42.976s ---
+  Referencia: 8.943956
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MC                        8.9344    0.0003    62516500   25.690    0.0096    NO    2
+  MLMC                      8.9325    0.0003   203338582    0.980    0.0115    NO   10
+  QMC Raw                   8.9331    0.0004     2097152    4.841    0.0109    NO   10
+  QMC BB                    8.9325    0.0001      131072    1.363    0.0114    NO   10
+  QMC PCA                   8.9329    0.0003      131072    0.623    0.0111    NO   10
+  MLQMC Raw                 8.9321    0.0003     4547360    2.880    0.0118    NO   10
+  MLQMC BB                  8.9329    0.0003     1854464    3.027    0.0111    NO   10
+  MLQMC PCA                 8.9326    0.0003     3878784    3.486    0.0114    NO   10
+
+    [nivel 5] MLMC listo: 1.5s totales, 10 reps
+    [nivel 5] QMC Raw listo: 20.3s totales, 4 reps
+    [nivel 5] QMC BB listo: 1.8s totales, 10 reps
+    [nivel 5] QMC PCA listo: 1.7s totales, 10 reps
+    [nivel 5] MLQMC Raw listo: 3.4s totales, 10 reps
+    [nivel 5] MLQMC BB listo: 4.4s totales, 10 reps
+    [nivel 5] MLQMC PCA listo: 4.3s totales, 10 reps
+--- nivel 5 eps=0.001 wall=38.828s ---
+  Referencia: 8.943956
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MLMC                      8.9326    0.0002   813525430    1.492    0.0113    NO   10
+  QMC Raw                   8.9317    0.0002    16777216   20.331    0.0122    NO    4
+  QMC BB                    8.9319    0.0001      131072    1.833    0.0121    NO   10
+  QMC PCA                   8.9323    0.0002      262144    1.706    0.0117    NO   10
+  MLQMC Raw                 8.9324    0.0001     7688288    3.406    0.0115    NO   10
+  MLQMC BB                  8.9326    0.0002     6872960    4.440    0.0113    NO   10
+  MLQMC PCA                 8.9328    0.0002     9979808    4.333    0.0112    NO   10
+  MC                    --  (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+    [nivel 6] MLMC listo: 4.2s totales, 10 reps
+    [nivel 6] QMC BB listo: 2.5s totales, 10 reps
+    [nivel 6] QMC PCA listo: 3.8s totales, 10 reps
+    [nivel 6] MLQMC Raw listo: 2.8s totales, 10 reps
+    [nivel 6] MLQMC BB listo: 8.1s totales, 10 reps
+    [nivel 6] MLQMC PCA listo: 3.9s totales, 10 reps
+--- nivel 6 eps=5e-04 wall=25.874s ---
+  Referencia: 8.943956
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MLMC                      8.9326    0.0001  3253508918    4.208    0.0113    NO   10
+  QMC BB                    8.9319    0.0001      131072    2.512    0.0121    NO   10
+  QMC PCA                   8.9321    0.0001     1048576    3.794    0.0119    NO   10
+  MLQMC Raw                 8.9325    0.0001    18734112    2.796    0.0114    NO   10
+  MLQMC BB                  8.9326    0.0001    11158112    8.122    0.0114    NO   10
+  MLQMC PCA                 8.9326    0.0001    11644960    3.878    0.0114    NO   10
+  QMC Raw               --  (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+    [nivel 7] MLMC listo: 19.3s totales, 10 reps
+    [nivel 7] QMC BB listo: 5.1s totales, 10 reps
+    [nivel 7] QMC PCA listo: 17.4s totales, 10 reps
+    [nivel 7] MLQMC Raw listo: 2.5s totales, 10 reps
+    [nivel 7] MLQMC BB listo: 6.4s totales, 10 reps
+    [nivel 7] MLQMC PCA listo: 3.0s totales, 10 reps
+--- nivel 7 eps=2e-04 wall=54.381s ---
+  Referencia: 8.943956
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MLMC                      8.9325    0.0000 20333645590   19.320    0.0115    NO   10
+  QMC BB                    8.9319    0.0000      524288    5.119    0.0121    NO   10
+  QMC PCA                   8.9319    0.0001     4194304   17.419    0.0120    NO   10
+  MLQMC Raw                 8.9325    0.0001    95757248    2.506    0.0114    NO   10
+  MLQMC BB                  8.9325    0.0000    51361568    6.432    0.0114    NO   10
+  MLQMC PCA                 8.9326    0.0000    58646464    3.022    0.0114    NO   10
+
+    [nivel 8] MLMC listo: 22.3s totales, 3 reps
+    [nivel 8] QMC BB listo: 7.6s totales, 10 reps
+    [nivel 8] QMC PCA listo: 20.9s totales, 5 reps
+    [nivel 8] MLQMC Raw listo: 4.4s totales, 10 reps
+    [nivel 8] MLQMC BB listo: 4.3s totales, 10 reps
+    [nivel 8] MLQMC PCA listo: 3.2s totales, 10 reps
+--- nivel 8 eps=1e-04 wall=63.111s ---
+  Referencia: 8.943956
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MLMC                      8.9325    0.0000 81472955183   22.328    0.0115    NO    3
+  QMC BB                    8.9319    0.0000     1048576    7.637    0.0121    NO   10
+  QMC PCA                   8.9319    0.0000     8388608   20.929    0.0121    NO    5
+  MLQMC Raw                 8.9326    0.0000   325689952    4.401    0.0114    NO   10
+  MLQMC BB                  8.9326    0.0000   172561312    4.334    0.0114    NO   10
+  MLQMC PCA                 8.9326    0.0000   218735680    3.202    0.0114    NO   10
+
+    [nivel 9] QMC BB listo: 16.6s totales, 10 reps
+    [nivel 9] QMC PCA listo: 26.5s totales, 2 reps
+    [nivel 9] MLQMC Raw listo: 13.8s totales, 10 reps
+    [nivel 9] MLQMC BB listo: 5.3s totales, 10 reps
+    [nivel 9] MLQMC PCA listo: 9.1s totales, 10 reps
+--- nivel 9 eps=5e-05 wall=71.250s ---
+  Referencia: 8.943956
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  QMC BB                    8.9319    0.0000     4194304   16.579    0.0121    NO   10
+  QMC PCA                   8.9318    0.0000    16777216   26.470    0.0121    NO    2
+  MLQMC Raw                 8.9325    0.0000  1231773952   13.763    0.0114    NO   10
+  MLQMC BB                  8.9325    0.0000   684084224    5.264    0.0114    NO   10
+  MLQMC PCA                 8.9326    0.0000   849850048    9.060    0.0114    NO   10
+  MLMC                  --  (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+    [nivel 10] QMC BB listo: 23.2s totales, 5 reps
+    [nivel 10] MLQMC Raw listo: 21.4s totales, 3 reps
+    [nivel 10] MLQMC BB listo: 21.7s totales, 9 reps
+    [nivel 10] MLQMC PCA listo: 24.9s totales, 5 reps
+--- nivel 10 eps=2e-05 wall=91.062s ---
+  Referencia: 8.943956
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  QMC BB                    8.9319    0.0000     8388608   23.156    0.0121    NO    5
+  MLQMC Raw                 8.9325    0.0000  8041773568   21.367    0.0114    NO    3
+  MLQMC BB                  8.9325    0.0000  4476637952   21.671    0.0115    NO    9
+  MLQMC PCA                 8.9326    0.0000  6943462336   24.868    0.0114    NO    5
+  QMC PCA               --  (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+    [nivel 11] QMC BB listo: 20.6s totales, 2 reps
+    [nivel 11] MLQMC BB listo: 28.0s totales, 3 reps
+    [nivel 11] MLQMC PCA listo: 36.7s totales, 2 reps
+--- nivel 11 eps=1e-05 wall=85.332s ---
+  Referencia: 8.943956
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  QMC BB                    8.9319    0.0000    16777216   20.645    0.0121    NO    2
+  MLQMC BB                  8.9325    0.0000 23171705184   28.027    0.0115    NO    3
+  MLQMC PCA                 8.9326    0.0000 20653047200   36.660    0.0114    NO    2
+  MLQMC Raw             --  (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+--- nivel 12 eps=1e-06 wall=0.000s ---
+  Referencia: 8.943956
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  QMC BB                --  (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+  MLQMC BB              --  (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+  MLQMC PCA             --  (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+

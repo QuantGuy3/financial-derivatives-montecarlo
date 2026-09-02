@@ -1,0 +1,11 @@
+ejemplo01  428s  rc=0
+ejemplo02  502s  rc=0
+ejemplo03  530s  rc=0
+ejemplo04  359s  rc=0
+ejemplo05  246s  rc=0
+ejemplo06  494s  rc=0
+ejemplo07  137s  rc=0
+ejemplo08  87s  rc=0
+ejemplo09  594s  rc=0
+ejemplo10  214s  rc=0
+ejemplo11  234s  rc=0 (rerun)

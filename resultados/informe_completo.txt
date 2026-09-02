@@ -1,0 +1,599 @@
+================================================================================================
+PonyTail VII - INFORME COMPLETO (barrido de precision, A100)
+Por ejemplo / eps / metodo: Precio, |Error|, StdErr, N, T(s), MSE_est
+MSE_est = |Error|^2 + StdErr^2   (sesgo^2 + varianza del estimador)
+================================================================================================
+
+################################################################################################
+### ejemplo01_european    (referencia = 10.450584)
+################################################################################################
+-- eps = 0.05        wall = 0.51s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.02        wall = 0.70s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.01        wall = 2.03s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.005       wall = 8.66s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.002       wall = 27.80s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.001       wall = 22.14s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  MC                       --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+-- eps = 5e-04       wall = 42.12s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 2e-04       wall = 62.81s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  QMC Raw                  --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+-- eps = 1e-04       wall = 88.80s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 5e-05       wall = 70.03s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  MLMC                     --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+  QMC PCA                  --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+-- eps = 2e-05       wall = 81.07s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  MLQMC Raw                --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+-- eps = 1e-05       wall = 20.65s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  MLQMC BB                 --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+  MLQMC PCA                --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+-- eps = 1e-06       wall = 0.00s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  QMC BB                   --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+################################################################################################
+### ejemplo02_asian    (referencia = 6.128472)
+################################################################################################
+-- eps = 0.05        wall = 1.67s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.02        wall = 2.72s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.01        wall = 10.72s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.005       wall = 34.65s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.002       wall = 50.07s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.001       wall = 41.06s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  MC                       --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+-- eps = 5e-04       wall = 51.37s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 2e-04       wall = 46.51s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  QMC Raw                  --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+-- eps = 1e-04       wall = 74.20s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 5e-05       wall = 73.90s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  MLMC                     --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+-- eps = 2e-05       wall = 91.85s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  QMC BB                   --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+-- eps = 1e-05       wall = 21.57s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  MLQMC Raw                --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+  MLQMC BB                 --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+  MLQMC PCA                --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+-- eps = 1e-06       wall = 0.00s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  QMC PCA                  --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+################################################################################################
+### ejemplo03_lookback    (referencia = 18.155249)
+################################################################################################
+-- eps = 0.05        wall = 1.38s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.02        wall = 3.22s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.01        wall = 10.26s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.005       wall = 35.66s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.002       wall = 91.88s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  MC                       --   (una corrida supero el presupuesto de 20s; cortado aqui y en los eps mas finos)
+
+-- eps = 0.001       wall = 69.66s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 5e-04       wall = 99.36s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  QMC Raw                  --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+-- eps = 2e-04       wall = 118.97s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  QMC BB                   --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+-- eps = 1e-04       wall = 99.09s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  MLMC                     --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+  QMC PCA                  --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+-- eps = 5e-05       wall = 0.00s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  MLQMC Raw                --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+  MLQMC BB                 --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+  MLQMC PCA                --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+################################################################################################
+### ejemplo04_barrier    (referencia = 1.159241)
+################################################################################################
+-- eps = 0.05        wall = 0.92s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.02        wall = 1.89s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.01        wall = 3.31s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.005       wall = 7.71s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.002       wall = 56.15s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.001       wall = 166.47s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 5e-04       wall = 121.72s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  MC                       --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+  QMC Raw                  --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+  QMC BB                   --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+-- eps = 2e-04       wall = 0.00s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  MLMC                     --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+  QMC PCA                  --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+  MLQMC Raw                --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+  MLQMC BB                 --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+  MLQMC PCA                --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+################################################################################################
+### ejemplo05_heston    (referencia = 10.163574)
+################################################################################################
+-- eps = 0.1         wall = 0.34s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.05        wall = 0.60s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.02        wall = 1.41s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.01        wall = 5.95s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.005       wall = 32.80s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.002       wall = 89.61s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  MC                       --   (una corrida supero el presupuesto de 20s; cortado aqui y en los eps mas finos)
+
+-- eps = 0.001       wall = 46.60s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  QMC Raw                  --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+-- eps = 5e-04       wall = 68.53s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 2e-04       wall = 0.00s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  MLMC                     --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+  MLQMC Raw                --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+################################################################################################
+### ejemplo06_dupire    (referencia = 8.943956)
+################################################################################################
+-- eps = 0.05        wall = 0.91s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.02        wall = 1.40s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.01        wall = 3.26s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.005       wall = 14.57s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.002       wall = 42.98s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.001       wall = 38.83s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  MC                       --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+-- eps = 5e-04       wall = 25.87s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  QMC Raw                  --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+-- eps = 2e-04       wall = 54.38s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 1e-04       wall = 63.11s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 5e-05       wall = 71.25s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  MLMC                     --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+-- eps = 2e-05       wall = 91.06s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  QMC PCA                  --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+-- eps = 1e-05       wall = 85.33s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  MLQMC Raw                --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+-- eps = 1e-06       wall = 0.00s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  QMC BB                   --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+  MLQMC BB                 --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+  MLQMC PCA                --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+################################################################################################
+### ejemplo07_basket_uncorr    (referencia = 4.872413)
+################################################################################################
+-- eps = 0.05        wall = 1.05s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.02        wall = 1.50s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.01        wall = 2.45s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.005       wall = 6.41s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.002       wall = 11.02s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.001       wall = 26.76s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 5e-04       wall = 30.52s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 2e-04       wall = 7.56s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  MC                       --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+-- eps = 1e-04       wall = 23.86s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 5e-05       wall = 25.80s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 2e-05       wall = 0.00s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  QMC Raw                  --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+################################################################################################
+### ejemplo08_basket_corr    (referencia = 4.851512)
+################################################################################################
+-- eps = 0.05        wall = 0.68s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.02        wall = 0.66s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.01        wall = 1.15s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.005       wall = 2.41s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.002       wall = 24.00s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.001       wall = 31.23s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  MC                       --   (una corrida supero el presupuesto de 20s; cortado aqui y en los eps mas finos)
+
+-- eps = 5e-04       wall = 25.98s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 2e-04       wall = 0.00s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  QMC Raw                  --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+################################################################################################
+### ejemplo09_asian_cv    (referencia = 6.061454)
+################################################################################################
+-- eps = 0.05        wall = 1.62s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.02        wall = 2.27s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.01        wall = 5.72s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.005       wall = 29.82s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.002       wall = 54.89s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.001       wall = 36.75s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  MC                       --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+-- eps = 5e-04       wall = 23.86s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  MC+CV(beta=0)            --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+-- eps = 2e-04       wall = 43.67s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 1e-04       wall = 77.36s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 5e-05       wall = 75.68s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  MLMC                     --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+-- eps = 2e-05       wall = 109.26s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  QMC+CV Raw               --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+-- eps = 1e-05       wall = 132.18s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  QMC+CV BB                --   (una corrida supero el presupuesto de 20s; cortado aqui y en los eps mas finos)
+  MC + CV (geom)           --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+-- eps = 1e-06       wall = 0.00s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  QMC+CV PCA               --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+  MLMC + CV (geom)         --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+  MLQMC+CV Raw             --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+  MLQMC+CV BB              --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+  MLQMC+CV PCA             --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+################################################################################################
+### ejemplo10_dupire_cv    (referencia = 8.943956)
+################################################################################################
+-- eps = 0.05        wall = 0.29s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.02        wall = 0.62s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.01        wall = 2.22s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.005       wall = 11.39s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.002       wall = 29.86s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.001       wall = 19.56s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  MC (Dupire)              --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+-- eps = 5e-04       wall = 49.34s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 2e-04       wall = 77.33s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  QMC + CV (GBM)           --   (una corrida supero el presupuesto de 20s; cortado aqui y en los eps mas finos)
+
+-- eps = 1e-04       wall = 22.35s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  MC + CV (GBM)            --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+-- eps = 5e-05       wall = 0.00s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  MLMC                     --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+################################################################################################
+### ejemplo11_otm_is    (referencia = 0.028643)
+################################################################################################
+-- eps = 0.05        wall = 0.53s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.02        wall = 0.54s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.01        wall = 0.80s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.005       wall = 1.10s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.002       wall = 1.99s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 0.001       wall = 3.65s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 5e-04       wall = 12.96s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 2e-04       wall = 27.93s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  MC (plain)               --   (una corrida supero el presupuesto de 20s; cortado aqui y en los eps mas finos)
+
+-- eps = 1e-04       wall = 9.55s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 5e-05       wall = 14.72s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 2e-05       wall = 49.88s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 1e-05       wall = 80.30s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+
+-- eps = 1e-06       wall = 29.06s --
+  metodo               Precio   |Error|    StdErr               N     T(s)     MSE_est  OK
+  ----------------------------------------------------------------------------------------
+  IS                       --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+  QMC+IS Raw               --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+  QMC+IS PCA               --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+  MLQMC+IS Raw             --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+  MLQMC+IS BB              --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+  MLQMC+IS PCA             --   (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+================================================================================================
+NOTA: la referencia es un MC fijo de 500k; su incertidumbre (~0.01-0.02 en
+varios ejemplos) domina el |Error| y el MSE_est cuando eps baja de ese umbral.
+Por eso el MSE_est se 'estanca': lo limita el sesgo frente a la referencia,
+no la varianza del metodo (que sigue cayendo, visible en StdErr).
+================================================================================================

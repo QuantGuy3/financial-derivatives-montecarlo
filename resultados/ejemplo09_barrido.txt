@@ -1,0 +1,304 @@
+
+##############################################################################
+### ejemplo09_asian_cv
+##############################################################################
+    [nivel 0] MC listo: 0.1s totales, 10 reps
+    [nivel 0] MC+CV(beta=0) listo: 0.0s totales, 10 reps
+    [nivel 0] MC + CV (geom) listo: 0.0s totales, 10 reps
+    [nivel 0] QMC+CV Raw listo: 0.3s totales, 10 reps
+    [nivel 0] QMC+CV BB listo: 0.3s totales, 10 reps
+    [nivel 0] QMC+CV PCA listo: 0.3s totales, 10 reps
+    [nivel 0] MLMC listo: 0.2s totales, 10 reps
+    [nivel 0] MLMC + CV (geom) listo: 0.0s totales, 10 reps
+    [nivel 0] MLQMC+CV Raw listo: 0.1s totales, 10 reps
+    [nivel 0] MLQMC+CV BB listo: 0.1s totales, 10 reps
+    [nivel 0] MLQMC+CV PCA listo: 0.1s totales, 10 reps
+--- nivel 0 eps=0.05 wall=1.623s ---
+  Referencia: 6.061454
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MC                        6.0662    0.0136       56070    0.055    0.0047    SI   10
+  MC+CV(beta=0)             6.0912    0.0098       56070    0.021    0.0298    SI   10
+  MC + CV (geom)            6.0776    0.0007       10000    0.017    0.0162    SI   10
+  QMC+CV Raw                6.0779    0.0001      131072    0.350    0.0164    SI   10
+  QMC+CV BB                 6.0778    0.0000      131072    0.307    0.0163    SI   10
+  QMC+CV PCA                6.0778    0.0000      131072    0.328    0.0163    SI   10
+  MLMC                      6.0688    0.0154      596397    0.155    0.0073    SI   10
+  MLMC + CV (geom)          6.0739    0.0071        2426    0.031    0.0124    SI   10
+  MLQMC+CV Raw              6.0707    0.0008       76800    0.063    0.0093    SI   10
+  MLQMC+CV BB               6.0712    0.0007       64000    0.074    0.0097    SI   10
+  MLQMC+CV PCA              6.0702    0.0014       76800    0.115    0.0088    SI   10
+
+    [nivel 1] MC listo: 0.3s totales, 10 reps
+    [nivel 1] MC+CV(beta=0) listo: 0.1s totales, 10 reps
+    [nivel 1] MC + CV (geom) listo: 0.0s totales, 10 reps
+    [nivel 1] QMC+CV Raw listo: 0.3s totales, 10 reps
+    [nivel 1] QMC+CV BB listo: 0.5s totales, 10 reps
+    [nivel 1] QMC+CV PCA listo: 0.3s totales, 10 reps
+    [nivel 1] MLMC listo: 0.2s totales, 10 reps
+    [nivel 1] MLMC + CV (geom) listo: 0.1s totales, 10 reps
+    [nivel 1] MLQMC+CV Raw listo: 0.1s totales, 10 reps
+    [nivel 1] MLQMC+CV BB listo: 0.1s totales, 10 reps
+    [nivel 1] MLQMC+CV PCA listo: 0.1s totales, 10 reps
+--- nivel 1 eps=0.02 wall=2.265s ---
+  Referencia: 6.061454
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MC                        6.0648    0.0028      348556    0.259    0.0033    SI   10
+  MC+CV(beta=0)             6.0667    0.0036      348556    0.083    0.0052    SI   10
+  MC + CV (geom)            6.0678    0.0006       10000    0.024    0.0064    SI   10
+  QMC+CV Raw                6.0683    0.0002      131072    0.336    0.0068    SI   10
+  QMC+CV BB                 6.0682    0.0000      131072    0.481    0.0068    SI   10
+  QMC+CV PCA                6.0682    0.0000      131072    0.319    0.0067    SI   10
+  MLMC                      6.0636    0.0042     4004727    0.222    0.0021    SI   10
+  MLMC + CV (geom)          6.0713    0.0037       14357    0.062    0.0099    SI   10
+  MLQMC+CV Raw              6.0649    0.0004       89600    0.075    0.0034    SI   10
+  MLQMC+CV BB               6.0653    0.0004       89600    0.094    0.0038    SI   10
+  MLQMC+CV PCA              6.0651    0.0006       89600    0.136    0.0037    SI   10
+
+    [nivel 2] MC listo: 1.9s totales, 10 reps
+    [nivel 2] MC+CV(beta=0) listo: 0.5s totales, 10 reps
+    [nivel 2] MC + CV (geom) listo: 0.0s totales, 10 reps
+    [nivel 2] QMC+CV Raw listo: 0.7s totales, 10 reps
+    [nivel 2] QMC+CV BB listo: 1.0s totales, 10 reps
+    [nivel 2] QMC+CV PCA listo: 0.5s totales, 10 reps
+    [nivel 2] MLMC listo: 0.3s totales, 10 reps
+    [nivel 2] MLMC + CV (geom) listo: 0.1s totales, 10 reps
+    [nivel 2] MLQMC+CV Raw listo: 0.1s totales, 10 reps
+    [nivel 2] MLQMC+CV BB listo: 0.1s totales, 10 reps
+    [nivel 2] MLQMC+CV PCA listo: 0.2s totales, 10 reps
+--- nivel 2 eps=0.01 wall=5.721s ---
+  Referencia: 6.061454
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MC                        6.0629    0.0020     1389373    1.916    0.0014    SI   10
+  MC+CV(beta=0)             6.0626    0.0026     1389374    0.497    0.0012    SI   10
+  MC + CV (geom)            6.0637    0.0005       10000    0.028    0.0022    SI   10
+  QMC+CV Raw                6.0634    0.0002      131072    0.681    0.0019    SI   10
+  QMC+CV BB                 6.0634    0.0000      131072    1.031    0.0020    SI   10
+  QMC+CV PCA                6.0634    0.0000      131072    0.485    0.0019    SI   10
+  MLMC                      6.0617    0.0025    16033959    0.296    0.0003    SI   10
+  MLMC + CV (geom)          6.0655    0.0024       58248    0.088    0.0041    SI   10
+  MLQMC+CV Raw              6.0614    0.0005      102400    0.088    0.0001    SI   10
+  MLQMC+CV BB               6.0615    0.0006      102400    0.119    0.0000    SI   10
+  MLQMC+CV PCA              6.0609    0.0008       89600    0.167    0.0005    SI   10
+
+    [nivel 3] MC listo: 20.2s totales, 9 reps
+    [nivel 3] MC+CV(beta=0) listo: 3.7s totales, 10 reps
+    [nivel 3] MC + CV (geom) listo: 0.0s totales, 10 reps
+    [nivel 3] QMC+CV Raw listo: 0.7s totales, 10 reps
+    [nivel 3] QMC+CV BB listo: 1.6s totales, 10 reps
+    [nivel 3] QMC+CV PCA listo: 0.8s totales, 10 reps
+    [nivel 3] MLMC listo: 0.4s totales, 10 reps
+    [nivel 3] MLMC + CV (geom) listo: 0.1s totales, 10 reps
+    [nivel 3] MLQMC+CV Raw listo: 0.1s totales, 10 reps
+    [nivel 3] MLQMC+CV BB listo: 0.2s totales, 10 reps
+    [nivel 3] MLQMC+CV PCA listo: 0.2s totales, 10 reps
+--- nivel 3 eps=0.005 wall=29.819s ---
+  Referencia: 6.061454
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MC                        6.0597    0.0015     5727745   20.200    0.0017    SI    9
+  MC+CV(beta=0)             6.0605    0.0011     5805084    3.734    0.0009    SI   10
+  MC + CV (geom)            6.0618    0.0007       10000    0.042    0.0004    SI   10
+  QMC+CV Raw                6.0611    0.0002      131072    0.686    0.0004    SI   10
+  QMC+CV BB                 6.0610    0.0000      131072    1.617    0.0004    SI   10
+  QMC+CV PCA                6.0610    0.0000      131072    0.808    0.0005    SI   10
+  MLMC                      6.0634    0.0014    64117493    0.419    0.0019    SI   10
+  MLMC + CV (geom)          6.0624    0.0015      231746    0.130    0.0009    SI   10
+  MLQMC+CV Raw              6.0594    0.0004      102400    0.098    0.0021    SI   10
+  MLQMC+CV BB               6.0598    0.0004      102400    0.154    0.0017    SI   10
+  MLQMC+CV PCA              6.0599    0.0007      115200    0.234    0.0016    SI   10
+
+    [nivel 4] MC listo: 27.8s totales, 2 reps
+    [nivel 4] MC+CV(beta=0) listo: 20.5s totales, 9 reps
+    [nivel 4] MC + CV (geom) listo: 0.1s totales, 10 reps
+    [nivel 4] QMC+CV Raw listo: 0.7s totales, 10 reps
+    [nivel 4] QMC+CV BB listo: 1.6s totales, 10 reps
+    [nivel 4] QMC+CV PCA listo: 0.8s totales, 10 reps
+    [nivel 4] MLMC listo: 1.1s totales, 10 reps
+    [nivel 4] MLMC + CV (geom) listo: 0.2s totales, 10 reps
+    [nivel 4] MLQMC+CV Raw listo: 0.3s totales, 10 reps
+    [nivel 4] MLQMC+CV BB listo: 0.4s totales, 10 reps
+    [nivel 4] MLQMC+CV PCA listo: 0.4s totales, 10 reps
+--- nivel 4 eps=0.002 wall=54.889s ---
+  Referencia: 6.061454
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MC                        6.0628    0.0003    33490113   27.792    0.0013    SI    2
+  MC+CV(beta=0)             6.0611    0.0005    35798404   20.500    0.0003    SI    9
+  MC + CV (geom)            6.0609    0.0003       28354    0.056    0.0006    SI   10
+  QMC+CV Raw                6.0611    0.0002      131072    0.686    0.0004    SI   10
+  QMC+CV BB                 6.0610    0.0000      131072    1.624    0.0004    SI   10
+  QMC+CV PCA                6.0610    0.0000      131072    0.808    0.0005    SI   10
+  MLMC                      6.0627    0.0005   400631642    1.140    0.0013    SI   10
+  MLMC + CV (geom)          6.0605    0.0005     1512074    0.211    0.0010    SI   10
+  MLQMC+CV Raw              6.0604    0.0003      215808    0.283    0.0010    SI   10
+  MLQMC+CV BB               6.0603    0.0001      194784    0.431    0.0011    SI   10
+  MLQMC+CV PCA              6.0606    0.0004      197280    0.434    0.0009    SI   10
+
+    [nivel 5] MC+CV(beta=0) listo: 27.2s totales, 3 reps
+    [nivel 5] MC + CV (geom) listo: 0.1s totales, 10 reps
+    [nivel 5] QMC+CV Raw listo: 0.7s totales, 10 reps
+    [nivel 5] QMC+CV BB listo: 1.6s totales, 10 reps
+    [nivel 5] QMC+CV PCA listo: 0.8s totales, 10 reps
+    [nivel 5] MLMC listo: 2.8s totales, 10 reps
+    [nivel 5] MLMC + CV (geom) listo: 0.4s totales, 10 reps
+    [nivel 5] MLQMC+CV Raw listo: 0.5s totales, 10 reps
+    [nivel 5] MLQMC+CV BB listo: 0.8s totales, 10 reps
+    [nivel 5] MLQMC+CV PCA listo: 0.8s totales, 10 reps
+--- nivel 5 eps=0.001 wall=36.750s ---
+  Referencia: 6.061454
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MC+CV(beta=0)             6.0612    0.0005   146728500   27.243    0.0003    SI    3
+  MC + CV (geom)            6.0609    0.0002      113410    0.115    0.0005    SI   10
+  QMC+CV Raw                6.0611    0.0002      131072    0.686    0.0004    SI   10
+  QMC+CV BB                 6.0610    0.0000      131072    1.627    0.0004    SI   10
+  QMC+CV PCA                6.0610    0.0000      131072    0.808    0.0005    SI   10
+  MLMC                      6.0633    0.0002  1602592920    2.809    0.0019    SI   10
+  MLMC + CV (geom)          6.0610    0.0003     6087546    0.409    0.0004    SI   10
+  MLQMC+CV Raw              6.0607    0.0002      686880    0.545    0.0008    SI   10
+  MLQMC+CV BB               6.0609    0.0002      644416    0.846    0.0006    SI   10
+  MLQMC+CV PCA              6.0610    0.0002      612672    0.751    0.0005    SI   10
+  MC                    --  (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+    [nivel 6] MC + CV (geom) listo: 0.3s totales, 10 reps
+    [nivel 6] QMC+CV Raw listo: 1.8s totales, 10 reps
+    [nivel 6] QMC+CV BB listo: 1.6s totales, 10 reps
+    [nivel 6] QMC+CV PCA listo: 0.8s totales, 10 reps
+    [nivel 6] MLMC listo: 10.9s totales, 10 reps
+    [nivel 6] MLMC + CV (geom) listo: 0.7s totales, 10 reps
+    [nivel 6] MLQMC+CV Raw listo: 1.8s totales, 10 reps
+    [nivel 6] MLQMC+CV BB listo: 2.4s totales, 10 reps
+    [nivel 6] MLQMC+CV PCA listo: 2.6s totales, 10 reps
+--- nivel 6 eps=5e-04 wall=23.865s ---
+  Referencia: 6.061454
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MC + CV (geom)            6.0610    0.0001      453640    0.327    0.0005    SI   10
+  QMC+CV Raw                6.0610    0.0001      262144    1.776    0.0005    SI   10
+  QMC+CV BB                 6.0610    0.0000      131072    1.633    0.0004    SI   10
+  QMC+CV PCA                6.0610    0.0000      131072    0.808    0.0005    SI   10
+  MLMC                      6.0635    0.0001  6410744764   10.874    0.0020    NO   10
+  MLMC + CV (geom)          6.0610    0.0001    26184884    0.739    0.0005    SI   10
+  MLQMC+CV Raw              6.0607    0.0001     1777920    1.805    0.0007    SI   10
+  MLQMC+CV BB               6.0608    0.0001     2297056    2.397    0.0006    SI   10
+  MLQMC+CV PCA              6.0609    0.0001     2396416    2.618    0.0006    SI   10
+  MC+CV(beta=0)         --  (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+    [nivel 7] MC + CV (geom) listo: 1.8s totales, 10 reps
+    [nivel 7] QMC+CV Raw listo: 4.8s totales, 10 reps
+    [nivel 7] QMC+CV BB listo: 2.0s totales, 10 reps
+    [nivel 7] QMC+CV PCA listo: 0.8s totales, 10 reps
+    [nivel 7] MLMC listo: 21.3s totales, 5 reps
+    [nivel 7] MLMC + CV (geom) listo: 1.0s totales, 10 reps
+    [nivel 7] MLQMC+CV Raw listo: 2.6s totales, 10 reps
+    [nivel 7] MLQMC+CV BB listo: 4.2s totales, 10 reps
+    [nivel 7] MLQMC+CV PCA listo: 4.1s totales, 10 reps
+--- nivel 7 eps=2e-04 wall=43.666s ---
+  Referencia: 6.061454
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MC + CV (geom)            6.0610    0.0000     2835242    1.824    0.0005    NO   10
+  QMC+CV Raw                6.0609    0.0000     1048576    4.822    0.0005    NO   10
+  QMC+CV BB                 6.0610    0.0000      131072    2.043    0.0004    NO   10
+  QMC+CV PCA                6.0610    0.0000      131072    0.827    0.0005    NO   10
+  MLMC                      6.0633    0.0000 40035516591   21.322    0.0019    NO    5
+  MLMC + CV (geom)          6.0609    0.0000   163721926    1.022    0.0006    NO   10
+  MLQMC+CV Raw              6.0608    0.0000    10399104    2.593    0.0006    NO   10
+  MLQMC+CV BB               6.0609    0.0000     9081600    4.192    0.0006    NO   10
+  MLQMC+CV PCA              6.0609    0.0000     8659488    4.091    0.0005    NO   10
+
+    [nivel 8] MC + CV (geom) listo: 7.2s totales, 10 reps
+    [nivel 8] QMC+CV Raw listo: 18.6s totales, 10 reps
+    [nivel 8] QMC+CV BB listo: 4.9s totales, 10 reps
+    [nivel 8] QMC+CV PCA listo: 1.0s totales, 10 reps
+    [nivel 8] MLMC listo: 33.0s totales, 2 reps
+    [nivel 8] MLMC + CV (geom) listo: 2.0s totales, 10 reps
+    [nivel 8] MLQMC+CV Raw listo: 1.8s totales, 10 reps
+    [nivel 8] MLQMC+CV BB listo: 4.2s totales, 10 reps
+    [nivel 8] MLQMC+CV PCA listo: 3.9s totales, 10 reps
+--- nivel 8 eps=1e-04 wall=77.362s ---
+  Referencia: 6.061454
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MC + CV (geom)            6.0610    0.0000    11340968    7.154    0.0005    NO   10
+  QMC+CV Raw                6.0610    0.0000     4194304   18.579    0.0005    NO   10
+  QMC+CV BB                 6.0610    0.0000      262144    4.892    0.0005    NO   10
+  QMC+CV PCA                6.0610    0.0000      262144    0.970    0.0005    NO   10
+  MLMC                      6.0633    0.0000160143723903   32.996    0.0018    NO    2
+  MLMC + CV (geom)          6.0608    0.0000   655126341    1.995    0.0006    NO   10
+  MLQMC+CV Raw              6.0608    0.0000    26419968    1.808    0.0006    NO   10
+  MLQMC+CV BB               6.0609    0.0000    27352512    4.159    0.0006    NO   10
+  MLQMC+CV PCA              6.0609    0.0000    18516416    3.918    0.0006    NO   10
+
+    [nivel 9] MC + CV (geom) listo: 22.8s totales, 8 reps
+    [nivel 9] QMC+CV Raw listo: 20.3s totales, 3 reps
+    [nivel 9] QMC+CV BB listo: 10.7s totales, 10 reps
+    [nivel 9] QMC+CV PCA listo: 2.8s totales, 10 reps
+    [nivel 9] MLMC + CV (geom) listo: 8.2s totales, 10 reps
+    [nivel 9] MLQMC+CV Raw listo: 2.3s totales, 10 reps
+    [nivel 9] MLQMC+CV BB listo: 3.9s totales, 10 reps
+    [nivel 9] MLQMC+CV PCA listo: 3.7s totales, 10 reps
+--- nivel 9 eps=5e-05 wall=75.676s ---
+  Referencia: 6.061454
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MC + CV (geom)            6.0610    0.0000    44128550   22.774    0.0005    NO    8
+  QMC+CV Raw                6.0610    0.0000    16777216   20.264    0.0005    NO    3
+  QMC+CV BB                 6.0610    0.0000     2097152   10.661    0.0005    NO   10
+  QMC+CV PCA                6.0610    0.0000      524288    2.817    0.0005    NO   10
+  MLMC + CV (geom)          6.0609    0.0000  2622297798    8.182    0.0006    NO   10
+  MLQMC+CV Raw              6.0609    0.0000    96233440    2.330    0.0006    NO   10
+  MLQMC+CV BB               6.0609    0.0000    65839360    3.940    0.0006    NO   10
+  MLQMC+CV PCA              6.0609    0.0000    48422624    3.724    0.0006    NO   10
+  MLMC                  --  (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+    [nivel 10] MC + CV (geom) listo: 34.5s totales, 2 reps
+    [nivel 10] QMC+CV BB listo: 23.2s totales, 5 reps
+    [nivel 10] QMC+CV PCA listo: 6.5s totales, 10 reps
+    [nivel 10] MLMC + CV (geom) listo: 21.4s totales, 8 reps
+    [nivel 10] MLQMC+CV Raw listo: 7.9s totales, 10 reps
+    [nivel 10] MLQMC+CV BB listo: 8.5s totales, 10 reps
+    [nivel 10] MLQMC+CV PCA listo: 6.3s totales, 10 reps
+--- nivel 10 eps=2e-05 wall=109.259s ---
+  Referencia: 6.061454
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MC + CV (geom)            6.0610    0.0000   253362704   34.479    0.0005    NO    2
+  QMC+CV BB                 6.0610    0.0000     8388608   23.172    0.0005    NO    5
+  QMC+CV PCA                6.0610    0.0000     2097152    6.529    0.0005    NO   10
+  MLMC + CV (geom)          6.0609    0.0000 16382169843   21.412    0.0006    NO    8
+  MLQMC+CV Raw              6.0609    0.0000   495573440    7.876    0.0006    NO   10
+  MLQMC+CV BB               6.0609    0.0000   387548416    8.487    0.0006    NO   10
+  MLQMC+CV PCA              6.0609    0.0000   268921024    6.332    0.0006    NO   10
+  QMC+CV Raw            --  (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+    [nivel 11] QMC+CV PCA listo: 21.5s totales, 9 reps
+    [nivel 11] MLMC + CV (geom) listo: 28.1s totales, 3 reps
+    [nivel 11] MLQMC+CV Raw listo: 21.5s totales, 9 reps
+    [nivel 11] MLQMC+CV BB listo: 22.2s totales, 10 reps
+    [nivel 11] MLQMC+CV PCA listo: 17.6s totales, 10 reps
+--- nivel 11 eps=1e-05 wall=132.178s ---
+  Referencia: 6.061454
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  QMC+CV PCA                6.0610    0.0000     4194304   21.509    0.0005    NO    9
+  MLMC + CV (geom)          6.0609    0.0000 68024216865   28.055    0.0006    NO    3
+  MLQMC+CV Raw              6.0609    0.0000  1878253024   21.527    0.0006    NO    9
+  MLQMC+CV BB               6.0609    0.0000  1222222848   22.228    0.0006    NO   10
+  MLQMC+CV PCA              6.0609    0.0000  1024752608   17.620    0.0006    NO   10
+  QMC+CV BB             --  (una corrida supero el presupuesto de 20s; cortado aqui y en los eps mas finos)
+  MC + CV (geom)        --  (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+--- nivel 12 eps=1e-06 wall=0.000s ---
+  Referencia: 6.061454
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  QMC+CV PCA            --  (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+  MLMC + CV (geom)      --  (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+  MLQMC+CV Raw          --  (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+  MLQMC+CV BB           --  (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+  MLQMC+CV PCA          --  (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+

@@ -1,0 +1,286 @@
+
+##############################################################################
+### ejemplo11_otm_is
+##############################################################################
+    [nivel 0] MC (plain) listo: 0.0s totales, 30 reps
+    [nivel 0] IS listo: 0.0s totales, 10 reps
+    [nivel 0] QMC+IS Raw listo: 0.0s totales, 10 reps
+    [nivel 0] QMC+IS BB listo: 0.1s totales, 10 reps
+    [nivel 0] QMC+IS PCA listo: 0.2s totales, 10 reps
+    [nivel 0] MLMC + IS listo: 0.0s totales, 30 reps
+    [nivel 0] MLQMC+IS Raw listo: 0.0s totales, 10 reps
+    [nivel 0] MLQMC+IS BB listo: 0.0s totales, 10 reps
+    [nivel 0] MLQMC+IS PCA listo: 0.1s totales, 10 reps
+--- nivel 0 eps=0.05 wall=0.530s ---
+  Referencia: 0.028643
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MC (plain)                0.0202    0.0009       10000    0.019    0.0085    SI   30
+  IS                        0.0260    0.0001       10000    0.010    0.0026    SI   10
+  QMC+IS Raw                0.0261    0.0000      131072    0.025    0.0025    SI   10
+  QMC+IS BB                 0.0261    0.0000      131072    0.087    0.0025    SI   10
+  QMC+IS PCA                0.0261    0.0000      131072    0.186    0.0025    SI   10
+  MLMC + IS                 0.0128    0.0001        1200    0.030    0.0159    SI   30
+  MLQMC+IS Raw              0.0127    0.0000       38400    0.038    0.0159    SI   10
+  MLQMC+IS BB               0.0127    0.0000       38400    0.041    0.0159    SI   10
+  MLQMC+IS PCA              0.0127    0.0000       38400    0.091    0.0159    SI   10
+
+    [nivel 1] MC (plain) listo: 0.0s totales, 30 reps
+    [nivel 1] IS listo: 0.0s totales, 10 reps
+    [nivel 1] QMC+IS Raw listo: 0.1s totales, 10 reps
+    [nivel 1] QMC+IS BB listo: 0.1s totales, 10 reps
+    [nivel 1] QMC+IS PCA listo: 0.1s totales, 10 reps
+    [nivel 1] MLMC + IS listo: 0.0s totales, 30 reps
+    [nivel 1] MLQMC+IS Raw listo: 0.0s totales, 10 reps
+    [nivel 1] MLQMC+IS BB listo: 0.0s totales, 10 reps
+    [nivel 1] MLQMC+IS PCA listo: 0.1s totales, 10 reps
+--- nivel 1 eps=0.02 wall=0.537s ---
+  Referencia: 0.028643
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MC (plain)                0.0243    0.0011       10000    0.033    0.0044    SI   30
+  IS                        0.0273    0.0001       10000    0.010    0.0013    SI   10
+  QMC+IS Raw                0.0273    0.0000      131072    0.079    0.0013    SI   10
+  QMC+IS BB                 0.0273    0.0000      131072    0.143    0.0013    SI   10
+  QMC+IS PCA                0.0274    0.0000      131072    0.090    0.0013    SI   10
+  MLMC + IS                 0.0128    0.0001        1200    0.025    0.0159    SI   30
+  MLQMC+IS Raw              0.0127    0.0000       38400    0.037    0.0159    SI   10
+  MLQMC+IS BB               0.0127    0.0000       38400    0.040    0.0159    SI   10
+  MLQMC+IS PCA              0.0127    0.0000       38400    0.078    0.0159    SI   10
+
+    [nivel 2] MC (plain) listo: 0.0s totales, 30 reps
+    [nivel 2] IS listo: 0.0s totales, 10 reps
+    [nivel 2] QMC+IS Raw listo: 0.1s totales, 10 reps
+    [nivel 2] QMC+IS BB listo: 0.2s totales, 10 reps
+    [nivel 2] QMC+IS PCA listo: 0.1s totales, 10 reps
+    [nivel 2] MLMC + IS listo: 0.0s totales, 30 reps
+    [nivel 2] MLQMC+IS Raw listo: 0.1s totales, 10 reps
+    [nivel 2] MLQMC+IS BB listo: 0.1s totales, 10 reps
+    [nivel 2] MLQMC+IS PCA listo: 0.1s totales, 10 reps
+--- nivel 2 eps=0.01 wall=0.803s ---
+  Referencia: 0.028643
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MC (plain)                0.0268    0.0014       10905    0.040    0.0019    SI   30
+  IS                        0.0281    0.0001       10000    0.011    0.0005    SI   10
+  QMC+IS Raw                0.0280    0.0000      131072    0.135    0.0007    SI   10
+  QMC+IS BB                 0.0280    0.0000      131072    0.212    0.0007    SI   10
+  QMC+IS PCA                0.0280    0.0000      131072    0.145    0.0006    SI   10
+  MLMC + IS                 0.0225    0.0008        2000    0.040    0.0062    SI   30
+  MLQMC+IS Raw              0.0237    0.0001       64000    0.055    0.0050    SI   10
+  MLQMC+IS BB               0.0237    0.0000       64000    0.062    0.0049    SI   10
+  MLQMC+IS PCA              0.0237    0.0000       64000    0.101    0.0049    SI   10
+
+    [nivel 3] MC (plain) listo: 0.1s totales, 30 reps
+    [nivel 3] IS listo: 0.0s totales, 10 reps
+    [nivel 3] QMC+IS Raw listo: 0.2s totales, 10 reps
+    [nivel 3] QMC+IS BB listo: 0.3s totales, 10 reps
+    [nivel 3] QMC+IS PCA listo: 0.2s totales, 10 reps
+    [nivel 3] MLMC + IS listo: 0.0s totales, 11 reps
+    [nivel 3] MLQMC+IS Raw listo: 0.1s totales, 10 reps
+    [nivel 3] MLQMC+IS BB listo: 0.1s totales, 10 reps
+    [nivel 3] MLQMC+IS PCA listo: 0.1s totales, 10 reps
+--- nivel 3 eps=0.005 wall=1.100s ---
+  Referencia: 0.028643
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MC (plain)                0.0274    0.0008       41484    0.069    0.0012    SI   30
+  IS                        0.0283    0.0001       10000    0.014    0.0004    SI   10
+  QMC+IS Raw                0.0283    0.0000      131072    0.167    0.0004    SI   10
+  QMC+IS BB                 0.0283    0.0000      131072    0.300    0.0003    SI   10
+  QMC+IS PCA                0.0283    0.0000      131072    0.231    0.0003    SI   10
+  MLMC + IS                 0.0271    0.0003        2800    0.021    0.0015    SI   11
+  MLQMC+IS Raw              0.0273    0.0001       89600    0.075    0.0013    SI   10
+  MLQMC+IS BB               0.0274    0.0000       89600    0.093    0.0013    SI   10
+  MLQMC+IS PCA              0.0274    0.0000       89600    0.125    0.0013    SI   10
+
+    [nivel 4] MC (plain) listo: 0.5s totales, 30 reps
+    [nivel 4] IS listo: 0.0s totales, 10 reps
+    [nivel 4] QMC+IS Raw listo: 0.3s totales, 10 reps
+    [nivel 4] QMC+IS BB listo: 0.5s totales, 10 reps
+    [nivel 4] QMC+IS PCA listo: 0.3s totales, 10 reps
+    [nivel 4] MLMC + IS listo: 0.0s totales, 12 reps
+    [nivel 4] MLQMC+IS Raw listo: 0.1s totales, 10 reps
+    [nivel 4] MLQMC+IS BB listo: 0.1s totales, 10 reps
+    [nivel 4] MLQMC+IS PCA listo: 0.1s totales, 10 reps
+--- nivel 4 eps=0.002 wall=1.994s ---
+  Referencia: 0.028643
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MC (plain)                0.0283    0.0003      271673    0.533    0.0004    SI   30
+  IS                        0.0284    0.0001       10000    0.021    0.0002    SI   10
+  QMC+IS Raw                0.0285    0.0000      131072    0.253    0.0002    SI   10
+  QMC+IS BB                 0.0285    0.0000      131072    0.457    0.0002    SI   10
+  QMC+IS PCA                0.0285    0.0000      131072    0.315    0.0002    SI   10
+  MLMC + IS                 0.0281    0.0003        3461    0.043    0.0005    SI   12
+  MLQMC+IS Raw              0.0279    0.0001      102400    0.088    0.0007    SI   10
+  MLQMC+IS BB               0.0280    0.0000      102400    0.127    0.0006    SI   10
+  MLQMC+IS PCA              0.0280    0.0000      102400    0.140    0.0006    SI   10
+
+    [nivel 5] MC (plain) listo: 0.9s totales, 17 reps
+    [nivel 5] IS listo: 0.0s totales, 10 reps
+    [nivel 5] QMC+IS Raw listo: 0.7s totales, 10 reps
+    [nivel 5] QMC+IS BB listo: 1.0s totales, 10 reps
+    [nivel 5] QMC+IS PCA listo: 0.5s totales, 10 reps
+    [nivel 5] MLMC + IS listo: 0.1s totales, 10 reps
+    [nivel 5] MLQMC+IS Raw listo: 0.1s totales, 10 reps
+    [nivel 5] MLQMC+IS BB listo: 0.2s totales, 10 reps
+    [nivel 5] MLQMC+IS PCA listo: 0.2s totales, 10 reps
+--- nivel 5 eps=0.001 wall=3.654s ---
+  Referencia: 0.028643
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MC (plain)                0.0284    0.0003      640073    0.869    0.0002    SI   17
+  IS                        0.0285    0.0001       10000    0.021    0.0002    SI   10
+  QMC+IS Raw                0.0285    0.0000      131072    0.679    0.0001    SI   10
+  QMC+IS BB                 0.0286    0.0000      131072    0.991    0.0001    SI   10
+  QMC+IS PCA                0.0286    0.0000      131072    0.485    0.0001    SI   10
+  MLMC + IS                 0.0285    0.0002       10661    0.090    0.0001    SI   10
+  MLQMC+IS Raw              0.0283    0.0001      115200    0.105    0.0004    SI   10
+  MLQMC+IS BB               0.0283    0.0000      115200    0.180    0.0003    SI   10
+  MLQMC+IS PCA              0.0283    0.0000      115200    0.160    0.0003    SI   10
+
+    [nivel 6] MC (plain) listo: 7.6s totales, 10 reps
+    [nivel 6] IS listo: 0.0s totales, 10 reps
+    [nivel 6] QMC+IS Raw listo: 0.7s totales, 10 reps
+    [nivel 6] QMC+IS BB listo: 1.7s totales, 10 reps
+    [nivel 6] QMC+IS PCA listo: 0.8s totales, 10 reps
+    [nivel 6] MLMC + IS listo: 0.2s totales, 10 reps
+    [nivel 6] MLQMC+IS Raw listo: 0.1s totales, 10 reps
+    [nivel 6] MLQMC+IS BB listo: 0.3s totales, 10 reps
+    [nivel 6] MLQMC+IS PCA listo: 0.2s totales, 10 reps
+--- nivel 6 eps=5e-04 wall=12.956s ---
+  Referencia: 0.028643
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MC (plain)                0.0287    0.0002     3704265    7.634    0.0000    SI   10
+  IS                        0.0284    0.0002       10158    0.047    0.0002    SI   10
+  QMC+IS Raw                0.0286    0.0000      131072    0.679    0.0001    SI   10
+  QMC+IS BB                 0.0286    0.0000      131072    1.699    0.0000    SI   10
+  QMC+IS PCA                0.0286    0.0000      131072    0.813    0.0000    SI   10
+  MLMC + IS                 0.0284    0.0001       38290    0.160    0.0003    SI   10
+  MLQMC+IS Raw              0.0284    0.0001      128000    0.134    0.0002    SI   10
+  MLQMC+IS BB               0.0285    0.0000      128000    0.311    0.0001    SI   10
+  MLQMC+IS PCA              0.0285    0.0000      128000    0.192    0.0001    SI   10
+
+    [nivel 7] IS listo: 0.2s totales, 10 reps
+    [nivel 7] QMC+IS Raw listo: 0.7s totales, 10 reps
+    [nivel 7] QMC+IS BB listo: 1.7s totales, 10 reps
+    [nivel 7] QMC+IS PCA listo: 0.8s totales, 10 reps
+    [nivel 7] MLMC + IS listo: 0.2s totales, 10 reps
+    [nivel 7] MLQMC+IS Raw listo: 0.5s totales, 10 reps
+    [nivel 7] MLQMC+IS BB listo: 0.5s totales, 10 reps
+    [nivel 7] MLQMC+IS PCA listo: 0.8s totales, 10 reps
+--- nivel 7 eps=2e-04 wall=27.929s ---
+  Referencia: 0.028643
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  IS                        0.0286    0.0001       63480    0.157    0.0000    SI   10
+  QMC+IS Raw                0.0286    0.0000      131072    0.684    0.0001    SI   10
+  QMC+IS BB                 0.0286    0.0000      131072    1.701    0.0000    SI   10
+  QMC+IS PCA                0.0286    0.0000      131072    0.832    0.0000    SI   10
+  MLMC + IS                 0.0285    0.0000      263786    0.216    0.0001    SI   10
+  MLQMC+IS Raw              0.0285    0.0000      224864    0.452    0.0001    SI   10
+  MLQMC+IS BB               0.0286    0.0000      140800    0.512    0.0001    SI   10
+  MLQMC+IS PCA              0.0286    0.0000      177792    0.779    0.0000    SI   10
+  MC (plain)            --  (una corrida supero el presupuesto de 20s; cortado aqui y en los eps mas finos)
+
+    [nivel 8] IS listo: 0.2s totales, 10 reps
+    [nivel 8] QMC+IS Raw listo: 1.4s totales, 10 reps
+    [nivel 8] QMC+IS BB listo: 1.6s totales, 10 reps
+    [nivel 8] QMC+IS PCA listo: 0.8s totales, 10 reps
+    [nivel 8] MLMC + IS listo: 0.3s totales, 10 reps
+    [nivel 8] MLQMC+IS Raw listo: 1.1s totales, 10 reps
+    [nivel 8] MLQMC+IS BB listo: 1.8s totales, 10 reps
+    [nivel 8] MLQMC+IS PCA listo: 1.8s totales, 10 reps
+--- nivel 8 eps=1e-04 wall=9.555s ---
+  Referencia: 0.028643
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  IS                        0.0286    0.0000      253916    0.190    0.0001    SI   10
+  QMC+IS Raw                0.0286    0.0000      262144    1.431    0.0000    SI   10
+  QMC+IS BB                 0.0286    0.0000      131072    1.624    0.0000    SI   10
+  QMC+IS PCA                0.0286    0.0000      131072    0.808    0.0000    SI   10
+  MLMC + IS                 0.0286    0.0000     1083813    0.286    0.0001    SI   10
+  MLQMC+IS Raw              0.0285    0.0000      675136    1.093    0.0001    SI   10
+  MLQMC+IS BB               0.0286    0.0000      236992    1.831    0.0001    SI   10
+  MLQMC+IS PCA              0.0286    0.0000      474496    1.761    0.0001    SI   10
+
+    [nivel 9] IS listo: 1.5s totales, 10 reps
+    [nivel 9] QMC+IS Raw listo: 4.0s totales, 10 reps
+    [nivel 9] QMC+IS BB listo: 1.7s totales, 10 reps
+    [nivel 9] QMC+IS PCA listo: 1.5s totales, 10 reps
+    [nivel 9] MLMC + IS listo: 0.3s totales, 10 reps
+    [nivel 9] MLQMC+IS Raw listo: 1.1s totales, 10 reps
+    [nivel 9] MLQMC+IS BB listo: 2.4s totales, 10 reps
+    [nivel 9] MLQMC+IS PCA listo: 1.7s totales, 10 reps
+--- nivel 9 eps=5e-05 wall=14.718s ---
+  Referencia: 0.028643
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  IS                        0.0286    0.0000     1015660    1.503    0.0000    SI   10
+  QMC+IS Raw                0.0286    0.0000     1048576    3.960    0.0000    SI   10
+  QMC+IS BB                 0.0286    0.0000      131072    1.698    0.0000    SI   10
+  QMC+IS PCA                0.0286    0.0000      262144    1.533    0.0000    SI   10
+  MLMC + IS                 0.0285    0.0000     4355946    0.344    0.0001    SI   10
+  MLQMC+IS Raw              0.0285    0.0000     2160736    1.088    0.0001    SI   10
+  MLQMC+IS BB               0.0286    0.0000      567840    2.371    0.0001    SI   10
+  MLQMC+IS PCA              0.0286    0.0000     1449216    1.697    0.0001    SI   10
+
+    [nivel 10] IS listo: 11.7s totales, 10 reps
+    [nivel 10] QMC+IS Raw listo: 21.1s totales, 10 reps
+    [nivel 10] QMC+IS BB listo: 1.7s totales, 10 reps
+    [nivel 10] QMC+IS PCA listo: 4.2s totales, 10 reps
+    [nivel 10] MLMC + IS listo: 0.7s totales, 10 reps
+    [nivel 10] MLQMC+IS Raw listo: 2.2s totales, 10 reps
+    [nivel 10] MLQMC+IS BB listo: 4.7s totales, 10 reps
+    [nivel 10] MLQMC+IS PCA listo: 2.9s totales, 10 reps
+--- nivel 10 eps=2e-05 wall=49.878s ---
+  Referencia: 0.028643
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  IS                        0.0286    0.0000     6347864   11.694    0.0000    NO   10
+  QMC+IS Raw                0.0286    0.0000     8388608   21.131    0.0000    SI   10
+  QMC+IS BB                 0.0286    0.0000      131072    1.735    0.0000    NO   10
+  QMC+IS PCA                0.0286    0.0000     1048576    4.240    0.0000    SI   10
+  MLMC + IS                 0.0286    0.0000    27118977    0.750    0.0001    NO   10
+  MLQMC+IS Raw              0.0286    0.0000    10850240    2.201    0.0001    NO   10
+  MLQMC+IS BB               0.0286    0.0000     2504576    4.684    0.0001    NO   10
+  MLQMC+IS PCA              0.0286    0.0000     6011552    2.893    0.0001    NO   10
+
+    [nivel 11] IS listo: 22.0s totales, 10 reps
+    [nivel 11] QMC+IS Raw listo: 28.3s totales, 2 reps
+    [nivel 11] QMC+IS BB listo: 1.7s totales, 10 reps
+    [nivel 11] QMC+IS PCA listo: 15.2s totales, 10 reps
+    [nivel 11] MLMC + IS listo: 1.5s totales, 10 reps
+    [nivel 11] MLQMC+IS Raw listo: 2.1s totales, 10 reps
+    [nivel 11] MLQMC+IS BB listo: 6.3s totales, 10 reps
+    [nivel 11] MLQMC+IS PCA listo: 2.8s totales, 10 reps
+--- nivel 11 eps=1e-05 wall=80.300s ---
+  Referencia: 0.028643
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  IS                        0.0286    0.0000    25391456   21.977    0.0000    NO   10
+  QMC+IS Raw                0.0286    0.0000    33554432   28.261    0.0000    NO    2
+  QMC+IS BB                 0.0286    0.0000      131072    1.712    0.0000    NO   10
+  QMC+IS PCA                0.0286    0.0000     2097152   15.151    0.0000    NO   10
+  MLMC + IS                 0.0286    0.0000   108493580    1.452    0.0001    NO   10
+  MLQMC+IS Raw              0.0286    0.0000    37976224    2.091    0.0001    NO   10
+  MLQMC+IS BB               0.0286    0.0000     9174080    6.274    0.0001    NO   10
+  MLQMC+IS PCA              0.0286    0.0000    17756896    2.820    0.0001    NO   10
+
+    [nivel 12] QMC+IS BB listo: 4.7s totales, 10 reps
+    [nivel 12] MLMC + IS listo: 24.4s totales, 5 reps
+--- nivel 12 eps=1e-06 wall=29.059s ---
+  Referencia: 0.028643
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  QMC+IS BB                 0.0286    0.0000      524288    4.670    0.0000    NO   10
+  MLMC + IS                 0.0286    0.0000 10928650342   24.388    0.0001    NO    5
+  IS                    --  (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+  QMC+IS Raw            --  (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+  QMC+IS PCA            --  (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+  MLQMC+IS Raw          --  (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+  MLQMC+IS BB           --  (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+  MLQMC+IS PCA          --  (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+

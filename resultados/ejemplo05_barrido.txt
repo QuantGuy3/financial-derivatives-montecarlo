@@ -1,0 +1,107 @@
+
+##############################################################################
+### ejemplo05_heston
+##############################################################################
+    [nivel 0] MC listo: 0.1s totales, 10 reps
+    [nivel 0] MLMC listo: 0.1s totales, 10 reps
+    [nivel 0] QMC Raw listo: 0.1s totales, 10 reps
+    [nivel 0] MLQMC Raw listo: 0.1s totales, 10 reps
+--- nivel 0 eps=0.1 wall=0.337s ---
+  Referencia: 10.163574
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MC                       10.1762    0.0181       18874    0.056    0.0127    SI   10
+  MLMC                     10.1021    0.0223      463329    0.101    0.0615    SI   10
+  QMC Raw                  10.1469    0.0041      131072    0.085    0.0166    SI   10
+  MLQMC Raw                10.1480    0.0167       88576    0.095    0.0156    SI   10
+
+    [nivel 1] MC listo: 0.0s totales, 10 reps
+    [nivel 1] MLMC listo: 0.2s totales, 10 reps
+    [nivel 1] QMC Raw listo: 0.1s totales, 10 reps
+    [nivel 1] MLQMC Raw listo: 0.3s totales, 10 reps
+--- nivel 1 eps=0.05 wall=0.605s ---
+  Referencia: 10.163574
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MC                       10.1317    0.0148       74687    0.046    0.0318    SI   10
+  MLMC                     10.1448    0.0102     2739891    0.160    0.0188    SI   10
+  QMC Raw                  10.1396    0.0038      131072    0.142    0.0240    SI   10
+  MLQMC Raw                10.1389    0.0142      838432    0.256    0.0247    SI   10
+
+    [nivel 2] MC listo: 0.4s totales, 10 reps
+    [nivel 2] MLMC listo: 0.4s totales, 10 reps
+    [nivel 2] QMC Raw listo: 0.3s totales, 10 reps
+    [nivel 2] MLQMC Raw listo: 0.3s totales, 10 reps
+--- nivel 2 eps=0.02 wall=1.413s ---
+  Referencia: 10.163574
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MC                       10.1509    0.0049      478848    0.438    0.0126    SI   10
+  MLMC                     10.1416    0.0064    17113962    0.386    0.0220    SI   10
+  QMC Raw                  10.1456    0.0032      131072    0.267    0.0180    SI   10
+  MLQMC Raw                10.1416    0.0043     2787232    0.322    0.0220    SI   10
+
+    [nivel 3] MC listo: 3.0s totales, 10 reps
+    [nivel 3] MLMC listo: 0.7s totales, 10 reps
+    [nivel 3] QMC Raw listo: 1.7s totales, 10 reps
+    [nivel 3] MLQMC Raw listo: 0.5s totales, 10 reps
+--- nivel 3 eps=0.01 wall=5.945s ---
+  Referencia: 10.163574
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MC                       10.1503    0.0029     1947339    3.009    0.0133    SI   10
+  MLMC                     10.1484    0.0028    68435268    0.730    0.0151    SI   10
+  QMC Raw                  10.1480    0.0020      262144    1.713    0.0155    SI   10
+  MLQMC Raw                10.1439    0.0018     7878400    0.493    0.0197    SI   10
+
+    [nivel 4] MC listo: 21.6s totales, 7 reps
+    [nivel 4] MLMC listo: 3.4s totales, 10 reps
+    [nivel 4] QMC Raw listo: 6.7s totales, 10 reps
+    [nivel 4] MLQMC Raw listo: 1.1s totales, 10 reps
+--- nivel 4 eps=0.005 wall=32.805s ---
+  Referencia: 10.163574
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MC                       10.1498    0.0007     7661286   21.615    0.0138    NO    7
+  MLMC                     10.1479    0.0012   273823937    3.389    0.0157    NO   10
+  QMC Raw                  10.1480    0.0014     2097152    6.666    0.0155    NO   10
+  MLQMC Raw                10.1464    0.0009    22554976    1.135    0.0172    NO   10
+
+    [nivel 5] MLMC listo: 18.7s totales, 10 reps
+    [nivel 5] QMC Raw listo: 21.1s totales, 3 reps
+    [nivel 5] MLQMC Raw listo: 11.1s totales, 10 reps
+--- nivel 5 eps=0.002 wall=89.614s ---
+  Referencia: 10.163574
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MLMC                     10.1480    0.0005  1983933170   18.676    0.0156    NO   10
+  QMC Raw                  10.1495    0.0001     8388608   21.102    0.0141    NO    3
+  MLQMC Raw                10.1491    0.0006   207728352   11.053    0.0145    NO   10
+  MC                    --  (una corrida supero el presupuesto de 20s; cortado aqui y en los eps mas finos)
+
+    [nivel 6] MLMC listo: 22.8s totales, 5 reps
+    [nivel 6] MLQMC Raw listo: 23.8s totales, 5 reps
+--- nivel 6 eps=0.001 wall=46.603s ---
+  Referencia: 10.163574
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MLMC                     10.1496    0.0001 10214444275   22.850    0.0140    NO    5
+  MLQMC Raw                10.1494    0.0002   793907392   23.753    0.0142    NO    5
+  QMC Raw               --  (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+    [nivel 7] MLMC listo: 33.6s totales, 2 reps
+    [nivel 7] MLQMC Raw listo: 35.0s totales, 2 reps
+--- nivel 7 eps=5e-04 wall=68.532s ---
+  Referencia: 10.163574
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MLMC                     10.1500    0.0002 40691483955   33.564    0.0136    NO    2
+  MLQMC Raw                10.1498    0.0001  2752455552   34.968    0.0138    NO    2
+
+--- nivel 8 eps=2e-04 wall=0.000s ---
+  Referencia: 10.163574
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MLMC                  --  (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+  MLQMC Raw             --  (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+

@@ -1,0 +1,95 @@
+
+##############################################################################
+### ejemplo07_basket_uncorr
+##############################################################################
+    [nivel 0] MC listo: 0.1s totales, 10 reps
+    [nivel 0] QMC Raw listo: 0.9s totales, 10 reps
+--- nivel 0 eps=0.05 wall=1.046s ---
+  Referencia: 4.872413
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MC                        4.8127    0.0022       10000    0.106    0.0597    SI   10
+  QMC Raw                   4.8156    0.0000      131072    0.940    0.0568    SI   10
+
+    [nivel 1] MC listo: 0.1s totales, 10 reps
+    [nivel 1] QMC Raw listo: 1.4s totales, 10 reps
+--- nivel 1 eps=0.02 wall=1.500s ---
+  Referencia: 4.872413
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MC                        4.8513    0.0026       10000    0.127    0.0211    SI   10
+  QMC Raw                   4.8522    0.0000      131072    1.373    0.0202    SI   10
+
+    [nivel 2] MC listo: 0.2s totales, 10 reps
+    [nivel 2] QMC Raw listo: 2.2s totales, 10 reps
+--- nivel 2 eps=0.01 wall=2.448s ---
+  Referencia: 4.872413
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MC                        4.8642    0.0024       10000    0.210    0.0082    SI   10
+  QMC Raw                   4.8646    0.0000      131072    2.238    0.0078    SI   10
+
+    [nivel 3] MC listo: 1.2s totales, 10 reps
+    [nivel 3] QMC Raw listo: 5.2s totales, 10 reps
+--- nivel 3 eps=0.005 wall=6.407s ---
+  Referencia: 4.872413
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MC                        4.8704    0.0018       20595    1.180    0.0020    SI   10
+  QMC Raw                   4.8708    0.0000      131072    5.227    0.0016    SI   10
+
+    [nivel 4] MC listo: 5.9s totales, 10 reps
+    [nivel 4] QMC Raw listo: 5.1s totales, 10 reps
+--- nivel 4 eps=0.002 wall=11.020s ---
+  Referencia: 4.872413
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MC                        4.8712    0.0004      128717    5.914    0.0012    SI   10
+  QMC Raw                   4.8708    0.0000      131072    5.106    0.0016    SI   10
+
+    [nivel 5] MC listo: 21.5s totales, 10 reps
+    [nivel 5] QMC Raw listo: 5.3s totales, 10 reps
+--- nivel 5 eps=0.001 wall=26.759s ---
+  Referencia: 4.872413
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MC                        4.8708    0.0002      514866   21.489    0.0016    SI   10
+  QMC Raw                   4.8708    0.0000      131072    5.269    0.0016    SI   10
+
+    [nivel 6] MC listo: 25.3s totales, 3 reps
+    [nivel 6] QMC Raw listo: 5.2s totales, 10 reps
+--- nivel 6 eps=5e-04 wall=30.524s ---
+  Referencia: 4.872413
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  MC                        4.8709    0.0001     1999431   25.317    0.0015    NO    3
+  QMC Raw                   4.8708    0.0000      131072    5.207    0.0016    NO   10
+
+    [nivel 7] QMC Raw listo: 7.6s totales, 10 reps
+--- nivel 7 eps=2e-04 wall=7.564s ---
+  Referencia: 4.872413
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  QMC Raw                   4.8708    0.0000      262144    7.564    0.0016    NO   10
+  MC                    --  (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
+    [nivel 8] QMC Raw listo: 23.9s totales, 7 reps
+--- nivel 8 eps=1e-04 wall=23.858s ---
+  Referencia: 4.872413
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  QMC Raw                   4.8708    0.0000     1048576   23.858    0.0016    NO    7
+
+    [nivel 9] QMC Raw listo: 25.8s totales, 2 reps
+--- nivel 9 eps=5e-05 wall=25.804s ---
+  Referencia: 4.872413
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  QMC Raw                   4.8708    0.0000     2097152   25.804    0.0016    NO    2
+
+--- nivel 10 eps=2e-05 wall=0.000s ---
+  Referencia: 4.872413
+  Metodo                    Precio    StdErr           N     T(s)   |Error|   OK?    R
+  ------------------------------------------------------------------------------------
+  QMC Raw               --  (coste proyectado > 20s; no ejecutado, cortado aqui y en los eps mas finos)
+
