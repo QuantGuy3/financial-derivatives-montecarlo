@@ -10,6 +10,7 @@ add_executable(mc_tests
     test_rng_normal.cpp
     test_thread_pool.cpp
     test_sobol.cpp
+    test_mc_cpu.cpp
 )
 target_include_directories(mc_tests PRIVATE ${PROJECT_SOURCE_DIR}/third_party/doctest)
 target_compile_definitions(mc_tests PRIVATE MC_TEST_DIR="${CMAKE_CURRENT_SOURCE_DIR}")

@@ -1,0 +1,158 @@
+#pragma once
+// Núcleos de simulación del motor CPU (equivalentes a kernel_mc / kernel_multi_dupire de la GPU).
+//
+// Cada llamada simula un BLOQUE de kLanes caminos en paso sincronizado ("lockstep"):
+// el recurrente de Euler de un camino es una cadena de dependencias, pero kLanes cadenas
+// independientes avanzan intercaladas (paralelismo a nivel de instrucción) y el compilador
+// puede vectorizar los bucles internos sobre los carriles.
+//
+// Entrada: incrementos brownianos dW YA escalados (sqrt(h) incluido), en el layout de la GPU
+//   dW[(k*noise_dim + c)*ld + lane],   k = paso, c = componente del ruido, lane = camino.
+// Heston recibe dos componentes no correlacionadas; el núcleo aplica la Cholesky 2x2.
+// Salida: Y[lane] = payoff (descontado donde corresponda) de cada camino del bloque.
+
+#include "params.hpp"
+
+#include <algorithm>
+#include <cmath>
+
+namespace mc::cpu {
+
+#ifndef MC_LANES
+#define MC_LANES 8
+#endif
+inline constexpr int kLanes = MC_LANES;
+
+struct KCtx {
+    const CpuModel*  m = nullptr;
+    const CpuPayoff* p = nullptr;
+    int    n_steps = 1;
+    double h = 1.0;
+    double sqrt_h = 1.0;
+    double em = 1.0;       // exp(-kappa*h) (Heston)
+};
+
+inline KCtx make_kctx(const CpuModel& m, const CpuPayoff& p, int n_steps) {
+    KCtx c;
+    c.m = &m; c.p = &p; c.n_steps = n_steps;
+    c.h = m.T / n_steps;
+    c.sqrt_h = std::sqrt(c.h);
+    c.em = std::exp(-m.kappa * c.h);
+    return c;
+}
+
+// ---- payoffs --------------------------------------------------------------------------------
+
+template <PayoffKind PK>
+inline constexpr bool is_path_dep = (PK == PayoffKind::Asian || PK == PayoffKind::GeomAsian ||
+                                     PK == PayoffKind::Lookback || PK == PayoffKind::Barrier);
+
+template <PayoffKind PK>
+inline double running_init(double S0) {
+    if constexpr (PK == PayoffKind::Lookback) return S0;
+    else return 0.0;
+}
+
+template <PayoffKind PK>
+inline void running_update(double& run, double S) {
+    if constexpr (PK == PayoffKind::Asian) run += S;
+    else if constexpr (PK == PayoffKind::GeomAsian) run += std::log(S);
+    else if constexpr (PK == PayoffKind::Lookback) run = std::min(run, S);
+    else if constexpr (PK == PayoffKind::Barrier) run = std::max(run, S);
+}
+
+// Corrección BGK (monitorización discreta -> continua) aplicada al acumulador al final.
+template <PayoffKind PK>
+inline void apply_bgk(const CpuPayoff& p, double& run, double h_step) {
+    if (!p.bgk) return;
+    const double corr = std::exp(-BGK_BETA * p.sigma_bgk * std::sqrt(h_step));
+    if constexpr (PK == PayoffKind::Lookback) run *= corr;
+    else if constexpr (PK == PayoffKind::Barrier) run /= corr;
+}
+
+template <PayoffKind PK>
+inline double terminal_payoff(const CpuPayoff& p, double S_T, double run, int n_steps) {
+    if constexpr (PK == PayoffKind::European)
+        return std::max(S_T - p.K, 0.0) * p.discount;
+    else if constexpr (PK == PayoffKind::Asian)
+        return std::max(run / n_steps - p.K, 0.0);
+    else if constexpr (PK == PayoffKind::GeomAsian)
+        return std::max(std::exp(run / n_steps) - p.K, 0.0);
+    else if constexpr (PK == PayoffKind::Lookback)
+        return S_T - run;
+    else if constexpr (PK == PayoffKind::Barrier)
+        return (run >= p.B) ? 0.0 : std::max(S_T - p.K, 0.0) * p.discount;
+    else   // Basket: el llamante pasa la media de los activos como S_T
+        return std::max(S_T - p.K, 0.0) * p.discount;
+}
+
+// ---- pasos de Euler por modelo (un carril) ---------------------------------------------------
+
+inline double euler_gbm(const CpuModel& m, double S, double dw, double h) {
+    return S + m.mu * S * h + m.sigma * S * dw;
+}
+
+// sigma_loc(S,t) = sigma0 * exp(-alpha t) * (S/S0)^(beta-1);  e_t = exp(-alpha t) se pasa
+// calculado (compartido por todos los carriles del paso). S es absorbente en 0.
+inline double euler_dupire(const CpuModel& m, double S, double dw, double h, double e_t, double S0_ref) {
+    if (!(S > 0.0)) return 0.0;
+    const double sigma_loc = m.sigma0 * e_t * std::pow(S / S0_ref, m.beta_d - 1.0);
+    const double Sn = S + m.mu * S * h + sigma_loc * S * dw;
+    return Sn > 0.0 ? Sn : 0.0;
+}
+
+// ---- núcleo de un bloque ---------------------------------------------------------------------
+
+template <ModelKind MK, PayoffKind PK>
+void kernel_single(const KCtx& c, const double* dW, int ld, double* Y) {
+    constexpr int W = kLanes;
+    constexpr int dim = (MK == ModelKind::Heston) ? 2 : 1;
+    const CpuModel& m = *c.m;
+    const CpuPayoff& pp = *c.p;
+    const double h = c.h;
+
+    double S[W], V[W], run[W];
+    for (int l = 0; l < W; l++) {
+        S[l] = m.S0;
+        V[l] = m.v0;
+        run[l] = running_init<PK>(m.S0);
+    }
+
+    for (int k = 0; k < c.n_steps; k++) {
+        const double* dw = dW + (size_t)k * dim * ld;
+        if constexpr (MK == ModelKind::GBM) {
+            for (int l = 0; l < W; l++) S[l] = euler_gbm(m, S[l], dw[l], h);
+        } else if constexpr (MK == ModelKind::Dupire) {
+            const double e_t = std::exp(-m.alpha * (k * h));
+            for (int l = 0; l < W; l++) S[l] = euler_dupire(m, S[l], dw[l], h, e_t, m.S0);
+        } else {
+            static_assert(MK == ModelKind::Heston);
+            // S usa la varianza ANTES de actualizar; V se actualiza con el esquema exacto en
+            // media (Milstein exacto en v, como d_euler_heston).
+            for (int l = 0; l < W; l++) {
+                const double a1 = dw[l];
+                const double a2 = dw[ld + l];
+                const double dw1 = a1;
+                const double dw2 = m.l21 * a1 + m.l22 * a2;
+                const double Vp = std::max(V[l], 0.0);
+                const double sq = std::sqrt(Vp);
+                S[l] = S[l] + m.mu * S[l] * h + sq * S[l] * dw1;
+                V[l] = m.theta + c.em * (V[l] - m.theta) + m.xi * sq * dw2;
+            }
+        }
+        if constexpr (is_path_dep<PK>)
+            for (int l = 0; l < W; l++) running_update<PK>(run[l], S[l]);
+    }
+    if constexpr (is_path_dep<PK>)
+        for (int l = 0; l < W; l++) apply_bgk<PK>(pp, run[l], h);
+    for (int l = 0; l < W; l++) Y[l] = terminal_payoff<PK>(pp, S[l], run[l], c.n_steps);
+}
+
+// Cesta Dupire multi-activo (payoff Basket). dW ya CORRELACIONADO; scratch >= n_assets*kLanes.
+void kernel_basket(const KCtx& c, const double* dW, int ld, double* Y, double* scratch);
+
+using SingleFn = void (*)(const KCtx&, const double*, int, double*);
+// Núcleo [modelo x payoff] para GBM/Heston/Dupire (no MultiDupire).
+SingleFn select_single_kernel(ModelKind mk, PayoffKind pk);
+
+} // namespace mc::cpu

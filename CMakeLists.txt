@@ -73,8 +73,13 @@ target_link_libraries(mc_core PUBLIC Threads::Threads PRIVATE mc_warnings)
 add_library(mc_cpu STATIC
     cpu/thread_pool.cpp
     cpu/normal.cpp
+    cpu/noise.cpp
     cpu/sobol.cpp
     cpu/joe_kuo_data.cpp
+    cpu/params.cpp
+    cpu/kernels.cpp
+    cpu/path_sim.cpp
+    cpu/mc_cpu.cpp
 )
 target_include_directories(mc_cpu PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(mc_cpu PUBLIC mc_core PRIVATE mc_warnings)
