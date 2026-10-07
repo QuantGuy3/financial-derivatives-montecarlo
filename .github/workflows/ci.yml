@@ -1,0 +1,67 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  cpu-linux:
+    name: Linux (gcc) solo CPU
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configurar
+        run: cmake --preset linux-release -DMC_ENABLE_CUDA=OFF
+      - name: Compilar
+        run: cmake --build --preset linux-release
+      - name: Tests
+        run: ctest --preset linux-release
+
+  tsan-linux:
+    name: Linux ThreadSanitizer
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake --preset linux-tsan
+      - run: cmake --build --preset linux-tsan
+      - run: ctest --preset linux-tsan -L fast
+
+  cpu-windows-msvc:
+    name: Windows (MSVC) solo CPU
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+      - run: cmake --preset msvc-release
+      - run: cmake --build --preset msvc-release
+      - run: ctest --preset msvc-release
+
+  cpu-windows-mingw:
+    name: Windows (MinGW UCRT64) solo CPU
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: false
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+      - run: cmake --preset mingw-release
+      - run: cmake --build --preset mingw-release
+      - run: ctest --preset mingw-release
+
+  # Compila (sin ejecutar) el backend CUDA para detectar errores de sintaxis en
+  # methods_cuda.cu aunque el runner no tenga GPU. Se activa cuando haya un runner/contenedor
+  # con nvcc; mientras tanto se deja como referencia.
+  # cuda-compile:
+  #   runs-on: ubuntu-24.04
+  #   container: nvidia/cuda:12.4.1-devel-ubuntu22.04
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - run: cmake -S . -B build -DMC_ENABLE_CUDA=ON && cmake --build build

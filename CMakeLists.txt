@@ -1,40 +1,106 @@
 cmake_minimum_required(VERSION 3.22)
-project(mc_definitivo LANGUAGES CXX CUDA)
+project(mc_definitivo LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CUDA_STANDARD 20)
-set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-set(CMAKE_CUDA_ARCHITECTURES "80")   # A-100 sm_80
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-add_library(mc_core STATIC utils.cpp)
-target_include_directories(mc_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} /usr/include/eigen3)
-target_link_libraries(mc_core PUBLIC lapack blas)
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Tipo de build" FORCE)
+endif()
 
-add_library(mc_cuda STATIC methods_cuda.cu)
-target_include_directories(mc_cuda PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} /usr/include/eigen3)
-target_compile_options(mc_cuda PRIVATE
-    $<$<COMPILE_LANGUAGE:CUDA>:--use_fast_math -O3 -lineinfo>)
-target_link_libraries(mc_cuda PUBLIC cublas curand mc_core)
+# ---------------------------------------------------------------------------
+# Opciones
+# ---------------------------------------------------------------------------
+set(MC_ENABLE_CUDA "AUTO" CACHE STRING "Backend CUDA: AUTO (si hay nvcc), ON (obligatorio) u OFF")
+set_property(CACHE MC_ENABLE_CUDA PROPERTY STRINGS AUTO ON OFF)
+set(MC_ARCH "" CACHE STRING "Opt-in: 'native' compila el motor CPU con -march=native")
+option(MC_BUILD_TESTS    "Compilar la suite de tests (doctest)" ON)
+option(MC_BUILD_EXAMPLES "Compilar los ejemplos (hoy requieren CUDA)" ON)
 
-set(EXAMPLES
-    01_european
-    02_asian
-    03_lookback
-    04_barrier
-    05_heston
-    06_dupire
-    07_basket_uncorr
-    08_basket_corr
-    09_asian_cv
-    10_dupire_cv
-    11_otm_is
-)
+# ---------------------------------------------------------------------------
+# CUDA opcional: el build solo-CPU debe funcionar sin nvcc, sin Eigen ni lapack.
+# ---------------------------------------------------------------------------
+set(MC_HAS_CUDA OFF)
+if(NOT MC_ENABLE_CUDA STREQUAL "OFF")
+    include(CheckLanguage)
+    check_language(CUDA)
+    if(CMAKE_CUDA_COMPILER)
+        enable_language(CUDA)
+        set(CMAKE_CUDA_STANDARD 20)
+        set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+        if(NOT CMAKE_CUDA_ARCHITECTURES)
+            set(CMAKE_CUDA_ARCHITECTURES "80")   # A-100 sm_80
+        endif()
+        set(MC_HAS_CUDA ON)
+    elseif(MC_ENABLE_CUDA STREQUAL "ON")
+        message(FATAL_ERROR "MC_ENABLE_CUDA=ON pero no se encontró nvcc")
+    endif()
+endif()
+message(STATUS "Backend CUDA: ${MC_HAS_CUDA}")
 
-foreach(EX ${EXAMPLES})
-    string(REGEX MATCH "^[0-9]+" IDX "${EX}")
-    set(TARGET "ejemplo${IDX}")
-    add_executable(${TARGET} examples/ejemplo${EX}.cpp)
-    target_link_libraries(${TARGET} PRIVATE mc_cuda)
-endforeach()
+find_package(Threads REQUIRED)
+
+# MinGW: enlazado estático de libstdc++/libgcc/winpthread. Evita 0xc0000139 cuando en el
+# PATH conviven varias distribuciones de MinGW/MSYS2 (DLLs de runtime incompatibles) y
+# permite lanzar los .exe fuera de la shell de MSYS.
+if(MINGW)
+    add_link_options(-static)
+endif()
+
+# Avisos comunes (sin -Werror: los CUDA/MSVC añaden ruido propio)
+add_library(mc_warnings INTERFACE)
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(mc_warnings INTERFACE -Wall -Wextra)
+elseif(MSVC)
+    target_compile_options(mc_warnings INTERFACE /W3)
+endif()
+
+# ---------------------------------------------------------------------------
+# Núcleo: tipos, fórmulas analíticas, BB/PCA (CPU), estadísticos, barrido
+# ---------------------------------------------------------------------------
+add_library(mc_core STATIC utils.cpp sweep.cpp)
+target_include_directories(mc_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(mc_core PUBLIC Threads::Threads PRIVATE mc_warnings)
+
+# ---------------------------------------------------------------------------
+# Backend CUDA (solo si hay nvcc)
+# ---------------------------------------------------------------------------
+if(MC_HAS_CUDA)
+    add_library(mc_cuda STATIC methods_cuda.cu)
+    target_include_directories(mc_cuda PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_options(mc_cuda PRIVATE
+        $<$<COMPILE_LANGUAGE:CUDA>:--use_fast_math -O3 -lineinfo>)
+    target_link_libraries(mc_cuda PUBLIC cublas curand mc_core)
+
+    if(MC_BUILD_EXAMPLES)
+        set(EXAMPLES
+            01_european
+            02_asian
+            03_lookback
+            04_barrier
+            05_heston
+            06_dupire
+            07_basket_uncorr
+            08_basket_corr
+            09_asian_cv
+            10_dupire_cv
+            11_otm_is
+        )
+        foreach(EX ${EXAMPLES})
+            string(REGEX MATCH "^[0-9]+" IDX "${EX}")
+            set(TARGET "ejemplo${IDX}")
+            add_executable(${TARGET} examples/ejemplo${EX}.cpp)
+            target_link_libraries(${TARGET} PRIVATE mc_cuda)
+        endforeach()
+    endif()
+endif()
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+if(MC_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
