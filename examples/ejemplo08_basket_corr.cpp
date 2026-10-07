@@ -1,5 +1,5 @@
 #include <cstdlib>
-#include "../methods_cuda.cuh"
+#include "common.hpp"
 #include <cmath>
 #include <algorithm>
 #include <vector>
@@ -23,6 +23,7 @@ static void cholesky(std::vector<double>& L, int n) {
 }
 
 int main(int argc, char** argv) {
+    mc_examples::init(argc, argv);
     // ── Parámetros ───────────────────────────────────────────────────────────
     const int    N_ASSETS = 100;
     // ── Matriz de correlación aleatoria (seed=0): C = A*A^T/n, regularizada ──
@@ -70,11 +71,11 @@ int main(int argc, char** argv) {
 
     // ── Referencia (MC 5k, n_steps limitado a D_MAX/n = 200) ────────────────
     const int N_REF_STEPS = std::min(200, D_MAX_SOBOL / N_ASSETS);
-    double price_ref = run_mc_fixed(mv, pv, N_REF_STEPS, 5000, 99u).first;
+    double price_ref = mc::run_mc_fixed(mv, pv, N_REF_STEPS, 5000, 99u).first;
 
     // ── c1 por Richardson ────────────────────────────────────────────────────
     auto sim_fn = [&](int ns, long long np, unsigned s) -> double {
-        return run_mc_fixed(mv, pv, ns, np, s).first;
+        return mc::run_mc_fixed(mv, pv, ns, np, s).first;
     };
     double c1 = estimar_c1_richardson(sim_fn, basket.T, 4, 10000);
 
@@ -97,12 +98,12 @@ int main(int argc, char** argv) {
     methods.push_back({"MC", [&](unsigned so, double eps) {
         int ns = steps_for_eps(eps);
         MCConfig c = mc_cfg; c.seed += so;
-        return run_mc_cuda(mv, pv, eps, ns, c);
+        return mc::run_mc(mv, pv, eps, ns, c);
     }});
     methods.push_back({"QMC Raw", [&](unsigned so, double eps) {
         int ns = steps_for_eps(eps);
         QMCConfig c = qmc_cfg; c.seed += so;
-        return run_qmc_cuda(mv, pv, eps, ns, c, NoiseMode::Raw);
+        return mc::run_qmc(mv, pv, eps, ns, c, NoiseMode::Raw);
     }});
 
     run_precision_sweep("ejemplo08_basket_corr", methods, price_ref, eps_list);

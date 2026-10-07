@@ -5,6 +5,9 @@
 #include "mc_types.hpp"
 #include "sweep.hpp"
 
+// ¿Hay al menos un dispositivo CUDA utilizable? (lo usa engine/ para elegir el backend)
+bool cuda_device_available();
+
 // --------------------- //
 // Datos BB y PCA en GPU //
 // --------------------- //

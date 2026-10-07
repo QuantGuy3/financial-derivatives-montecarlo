@@ -1,5 +1,5 @@
 #include <cstdlib>
-#include "../methods_cuda.cuh"
+#include "common.hpp"
 #include <cmath>
 #include <algorithm>
 #include <vector>
@@ -14,6 +14,7 @@ static int steps_for_eps(double eps, double c1, double T) {
 }
 
 int main(int argc, char** argv) {
+    mc_examples::init(argc, argv);
     // ── Parámetros ───────────────────────────────────────────────────────────
     GBMParams gbm;                    // S0=100, mu=0.05, sigma=0.20, T=1.0
     const double K   = 100.0;
@@ -28,7 +29,7 @@ int main(int argc, char** argv) {
 
     // ── c1 por Richardson (independiente de eps) ─────────────────────────────
     auto sim_fn = [&](int ns, long long np, unsigned s) -> double {
-        return run_mc_fixed(mv, pv_main, ns, np, s).first;
+        return mc::run_mc_fixed(mv, pv_main, ns, np, s).first;
     };
     double c1 = estimar_c1_richardson(sim_fn, gbm.T, 4, 50000);
 
@@ -39,16 +40,8 @@ int main(int argc, char** argv) {
     // ── Referencia: MC 500k, con n_steps del nivel de eps MAS FINO a intentar
     // (mayor resolucion posible dentro del barrido), fijo para toda la tabla.
     int n_steps_ref = steps_for_eps(eps_list.back(), c1, gbm.T);
-    double price_ref = run_mc_fixed(mv, pv_main, n_steps_ref, 500000, 99u).first;
+    double price_ref = mc::run_mc_fixed(mv, pv_main, n_steps_ref, 500000, 99u).first;
 
-    // ── BB / PCA por nivel de MLQMC (eps-independiente) ──────────────────────
-    std::vector<DeviceBBData*>  dev_bb_list(L_MAX + 1);
-    std::vector<DevicePCAData*> dev_pca_list(L_MAX + 1);
-    for (int l = 0; l <= L_MAX; ++l) {
-        int nl = 1 << l;
-        dev_bb_list[l]  = bb_upload(bb_precompute(nl, gbm.T));
-        dev_pca_list[l] = pca_upload(pca_compute(nl, gbm.T));
-    }
 
     // ── Configuración ────────────────────────────────────────────────────────
     MCConfig  mc_cfg;
@@ -62,7 +55,7 @@ int main(int argc, char** argv) {
     auto prep_cv = [&](double eps) -> CVPrep {
         int ns = steps_for_eps(eps, c1, gbm.T);
         double Ec = geom_asian_analytic(gbm.S0, K, gbm.T, gbm.mu, gbm.sigma, ns);
-        CVPilot pilot = cv_pilot(mv, mv, pv_main, pv_ctrl, Ec, ns, 50000);
+        CVPilot pilot = mc::cv_pilot(mv, mv, pv_main, pv_ctrl, Ec, ns, 50000);
         return {ns, Ec, pilot.beta};
     };
 
@@ -72,46 +65,40 @@ int main(int argc, char** argv) {
     methods.push_back({"MC", [&](unsigned so, double eps) {
         int ns = steps_for_eps(eps, c1, gbm.T);
         MCConfig c = mc_cfg; c.seed += so;
-        return run_mc_cuda(mv, pv_main, eps, ns, c);
+        return mc::run_mc(mv, pv_main, eps, ns, c);
     }});
     methods.push_back({"MC+CV(beta=0)", [&](unsigned so, double eps) {
         auto p = prep_cv(eps);
         MCConfig c = mc_cfg; c.seed += so;
-        return run_mc_cv_cuda(mv, mv, pv_main, pv_ctrl, p.E_ctrl, 0.0, eps, p.n_steps, c);
+        return mc::run_mc_cv(mv, mv, pv_main, pv_ctrl, p.E_ctrl, 0.0, eps, p.n_steps, c);
     }});
     methods.push_back({"MC + CV (geom)", [&](unsigned so, double eps) {
         auto p = prep_cv(eps);
         MCConfig c = mc_cfg; c.seed += so;
-        return run_mc_cv_cuda(mv, mv, pv_main, pv_ctrl, p.E_ctrl, p.beta, eps, p.n_steps, c);
+        return mc::run_mc_cv(mv, mv, pv_main, pv_ctrl, p.E_ctrl, p.beta, eps, p.n_steps, c);
     }});
     // ── QMC + CV (geom): 3 construcciones de trayectoria ─────────────────────
     methods.push_back({"QMC+CV Raw", [&](unsigned so, double eps) {
         auto p = prep_cv(eps);
         QMCConfig c = qmc_cfg; c.seed += so;
-        return run_qmc_cv_cuda(mv, mv, pv_main, pv_ctrl, p.E_ctrl, p.beta, eps, p.n_steps, c,
+        return mc::run_qmc_cv(mv, mv, pv_main, pv_ctrl, p.E_ctrl, p.beta, eps, p.n_steps, c,
                                 NoiseMode::Raw);
     }});
     methods.push_back({"QMC+CV BB", [&](unsigned so, double eps) {
         auto p = prep_cv(eps);
-        DeviceBBData* dbb = bb_upload(bb_precompute(p.n_steps, gbm.T));
         QMCConfig c = qmc_cfg; c.seed += so;
-        MCResult r = run_qmc_cv_cuda(mv, mv, pv_main, pv_ctrl, p.E_ctrl, p.beta, eps, p.n_steps, c,
-                                      NoiseMode::BrownianBridge, dbb);
-        bb_free(dbb);
-        return r;
+        return mc::run_qmc_cv(mv, mv, pv_main, pv_ctrl, p.E_ctrl, p.beta, eps, p.n_steps, c,
+                                      NoiseMode::BrownianBridge);
     }});
     methods.push_back({"QMC+CV PCA", [&](unsigned so, double eps) {
         auto p = prep_cv(eps);
-        DevicePCAData* dpca = pca_upload(pca_compute(p.n_steps, gbm.T));
         QMCConfig c = qmc_cfg; c.seed += so;
-        MCResult r = run_qmc_cv_cuda(mv, mv, pv_main, pv_ctrl, p.E_ctrl, p.beta, eps, p.n_steps, c,
-                                      NoiseMode::PCA, nullptr, dpca);
-        pca_free(dpca);
-        return r;
+        return mc::run_qmc_cv(mv, mv, pv_main, pv_ctrl, p.E_ctrl, p.beta, eps, p.n_steps, c,
+                                      NoiseMode::PCA);
     }});
     methods.push_back({"MLMC", [&](unsigned so, double eps) {
         MLMCConfig c = ml_cfg; c.seed += so;
-        return run_mlmc_cuda(mv, pv_main, eps, c);
+        return mc::run_mlmc(mv, pv_main, eps, c);
     }});
     // NUEVO (TAREA 1a): control variate aplicado nivel a nivel dentro de MLMC/MLQMC.
     // Ver kernel_mlmc_cv_gbm_asian y run_mlmc_cv_cuda/run_mlqmc_cv_cuda en
@@ -122,34 +109,30 @@ int main(int argc, char** argv) {
     methods.push_back({"MLMC + CV (geom)", [&](unsigned so, double eps) {
         auto p = prep_cv(eps);
         MLMCConfig c = ml_cfg; c.seed += so;
-        return run_mlmc_cv_cuda(mv, mv, pv_main, pv_ctrl, p.E_ctrl, p.beta, eps, c);
+        return mc::run_mlmc_cv(mv, mv, pv_main, pv_ctrl, p.E_ctrl, p.beta, eps, c);
     }});
     // ── MLQMC + CV (geom): 3 construcciones de trayectoria ───────────────────
     methods.push_back({"MLQMC+CV Raw", [&](unsigned so, double eps) {
         auto p = prep_cv(eps);
         QMCConfig c = qmc_cfg; c.seed += so;
-        return run_mlqmc_cv_cuda(mv, mv, pv_main, pv_ctrl, p.E_ctrl, p.beta, eps, ml_cfg, c,
+        return mc::run_mlqmc_cv(mv, mv, pv_main, pv_ctrl, p.E_ctrl, p.beta, eps, ml_cfg, c,
                                   NoiseMode::Raw);
     }});
     methods.push_back({"MLQMC+CV BB", [&](unsigned so, double eps) {
         auto p = prep_cv(eps);
         QMCConfig c = qmc_cfg; c.seed += so;
-        return run_mlqmc_cv_cuda(mv, mv, pv_main, pv_ctrl, p.E_ctrl, p.beta, eps, ml_cfg, c,
-                                  NoiseMode::BrownianBridge, dev_bb_list);
+        return mc::run_mlqmc_cv(mv, mv, pv_main, pv_ctrl, p.E_ctrl, p.beta, eps, ml_cfg, c,
+                                  NoiseMode::BrownianBridge);
     }});
     methods.push_back({"MLQMC+CV PCA", [&](unsigned so, double eps) {
         auto p = prep_cv(eps);
         QMCConfig c = qmc_cfg; c.seed += so;
-        return run_mlqmc_cv_cuda(mv, mv, pv_main, pv_ctrl, p.E_ctrl, p.beta, eps, ml_cfg, c,
-                                  NoiseMode::PCA, {}, dev_pca_list);
+        return mc::run_mlqmc_cv(mv, mv, pv_main, pv_ctrl, p.E_ctrl, p.beta, eps, ml_cfg, c,
+                                  NoiseMode::PCA);
     }});
 
     run_precision_sweep("ejemplo09_asian_cv", methods, price_ref, eps_list);
 
     // ── Limpieza ─────────────────────────────────────────────────────────────
-    for (int l = 0; l <= L_MAX; ++l) {
-        bb_free(dev_bb_list[l]);
-        pca_free(dev_pca_list[l]);
-    }
     return 0;
 }

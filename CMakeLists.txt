@@ -17,7 +17,7 @@ set(MC_ENABLE_CUDA "AUTO" CACHE STRING "Backend CUDA: AUTO (si hay nvcc), ON (ob
 set_property(CACHE MC_ENABLE_CUDA PROPERTY STRINGS AUTO ON OFF)
 set(MC_ARCH "" CACHE STRING "Opt-in: 'native' compila el motor CPU con -march=native")
 option(MC_BUILD_TESTS    "Compilar la suite de tests (doctest)" ON)
-option(MC_BUILD_EXAMPLES "Compilar los ejemplos (hoy requieren CUDA)" ON)
+option(MC_BUILD_EXAMPLES "Compilar los ejemplos (backend CPU y, si hay nvcc, GPU)" ON)
 option(MC_BUILD_BENCH    "Compilar bench_cpu (benchmarks del motor CPU)" ON)
 
 # ---------------------------------------------------------------------------
@@ -106,28 +106,50 @@ if(MC_HAS_CUDA)
     target_compile_options(mc_cuda PRIVATE
         $<$<COMPILE_LANGUAGE:CUDA>:--use_fast_math -O3 -lineinfo>)
     target_link_libraries(mc_cuda PUBLIC cublas curand mc_core)
+endif()
 
-    if(MC_BUILD_EXAMPLES)
-        set(EXAMPLES
-            01_european
-            02_asian
-            03_lookback
-            04_barrier
-            05_heston
-            06_dupire
-            07_basket_uncorr
-            08_basket_corr
-            09_asian_cv
-            10_dupire_cv
-            11_otm_is
-        )
-        foreach(EX ${EXAMPLES})
-            string(REGEX MATCH "^[0-9]+" IDX "${EX}")
-            set(TARGET "ejemplo${IDX}")
-            add_executable(${TARGET} examples/ejemplo${EX}.cpp)
-            target_link_libraries(${TARGET} PRIVATE mc_cuda)
-        endforeach()
-    endif()
+# ---------------------------------------------------------------------------
+# Fachada: un único punto de entrada para CPU y GPU (engine/api.hpp).
+# Sin CUDA se enlaza engine/cuda_stub.cpp (mismas firmas que methods_cuda.cuh, lanzan excepción):
+# el adaptador y los ejemplos se compilan igual en cualquier máquina.
+# ---------------------------------------------------------------------------
+add_library(mc_engine STATIC
+    engine/facade.cpp
+    engine/plan.cpp
+    engine/cuda_adapter.cpp
+)
+target_include_directories(mc_engine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(mc_engine PUBLIC mc_cpu mc_core PRIVATE mc_warnings)
+if(MC_HAS_CUDA)
+    target_compile_definitions(mc_engine PUBLIC MC_HAS_CUDA=1)
+    target_link_libraries(mc_engine PUBLIC mc_cuda)
+else()
+    target_sources(mc_engine PRIVATE engine/cuda_stub.cpp)
+endif()
+
+# ---------------------------------------------------------------------------
+# Ejemplos (--backend=cpu|cuda --threads=N)
+# ---------------------------------------------------------------------------
+if(MC_BUILD_EXAMPLES)
+    set(EXAMPLES
+        01_european
+        02_asian
+        03_lookback
+        04_barrier
+        05_heston
+        06_dupire
+        07_basket_uncorr
+        08_basket_corr
+        09_asian_cv
+        10_dupire_cv
+        11_otm_is
+    )
+    foreach(EX ${EXAMPLES})
+        string(REGEX MATCH "^[0-9]+" IDX "${EX}")
+        set(TARGET "ejemplo${IDX}")
+        add_executable(${TARGET} examples/ejemplo${EX}.cpp)
+        target_link_libraries(${TARGET} PRIVATE mc_engine)
+    endforeach()
 endif()
 
 # ---------------------------------------------------------------------------

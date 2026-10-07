@@ -14,10 +14,11 @@ add_executable(mc_tests
     test_qmc_cpu.cpp
     test_mlmc_cpu.cpp
     test_vr_cpu.cpp
+    test_facade.cpp
 )
 target_include_directories(mc_tests PRIVATE ${PROJECT_SOURCE_DIR}/third_party/doctest)
 target_compile_definitions(mc_tests PRIVATE MC_TEST_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(mc_tests PRIVATE mc_cpu mc_core mc_warnings)
+target_link_libraries(mc_tests PRIVATE mc_engine mc_cpu mc_core mc_warnings)
 
 foreach(SUITE fast stat determinism)
     add_test(NAME mc_${SUITE} COMMAND mc_tests --test-suite=${SUITE})

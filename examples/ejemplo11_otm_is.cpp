@@ -1,5 +1,5 @@
 #include <cstdlib>
-#include "../methods_cuda.cuh"
+#include "common.hpp"
 #include <cmath>
 #include <algorithm>
 #include <vector>
@@ -24,6 +24,7 @@ static int steps_for_eps_is(double eps, double T) {
 }
 
 int main(int argc, char** argv) {
+    mc_examples::init(argc, argv);
     // ── Parámetros ───────────────────────────────────────────────────────────
     GBMParams gbm;
     gbm.S0    = 100.0;
@@ -45,21 +46,13 @@ int main(int argc, char** argv) {
     ModelVariant  mv = gbm;
     PayoffVariant pv = European{100.0, r, gbm.T};  // ATM payoff para estimar c1
     auto sim_fn = [&](int ns, long long np, unsigned s) -> double {
-        return run_mc_fixed(mv, pv, ns, np, s).first;
+        return mc::run_mc_fixed(mv, pv, ns, np, s).first;
     };
     double c1 = estimar_c1_richardson(sim_fn, gbm.T, 8, 50000);
 
     const int M_LEVELS = 2;
     const int L_MAX    = 10;
 
-    // ── BB / PCA por nivel de MLQMC (2^l pasos, eps-independiente) ───────────
-    std::vector<DeviceBBData*>  dev_bb_list(L_MAX + 1);
-    std::vector<DevicePCAData*> dev_pca_list(L_MAX + 1);
-    for (int l = 0; l <= L_MAX; ++l) {
-        int nl = 1 << l;
-        dev_bb_list[l]  = bb_upload(bb_precompute(nl, gbm.T));
-        dev_pca_list[l] = pca_upload(pca_compute(nl, gbm.T));
-    }
 
     // ── Configuración ────────────────────────────────────────────────────────
     MCConfig  mc_cfg;
@@ -82,11 +75,11 @@ int main(int argc, char** argv) {
     methods.push_back({"MC (plain)", [&](unsigned so, double eps) {
         int ns = steps_for_eps_mc(eps, c1, gbm.T);
         MCConfig c = mc_cfg; c.seed += so;
-        return run_mc_cuda(mv, PayoffVariant{payoff}, eps, ns, c);
+        return mc::run_mc(mv, PayoffVariant{payoff}, eps, ns, c);
     }});
     methods.push_back({"IS", [&](unsigned so, double eps) {
         MCConfig c = is_cfg; c.seed += so;
-        return run_is_cuda(gbm, payoff, z_star, eps, c);
+        return mc::run_is(gbm, payoff, z_star, eps, c);
     }});
     // NUEVO (TAREA 1b): mismo desplazamiento de IS, pero con Sobol (QMC) o
     // acoplado nivel a nivel dentro de MLMC. Ver kernel_mlmc_is_gbm_dw y
@@ -94,54 +87,42 @@ int main(int argc, char** argv) {
     // ── QMC + IS: 3 construcciones de trayectoria ────────────────────────────
     methods.push_back({"QMC+IS Raw", [&](unsigned so, double eps) {
         QMCConfig c = qmc_cfg; c.seed += so;
-        return run_qmc_is_cuda(gbm, payoff, z_star, eps, c, NoiseMode::Raw);
+        return mc::run_qmc_is(gbm, payoff, z_star, eps, c, NoiseMode::Raw);
     }});
     methods.push_back({"QMC+IS BB", [&](unsigned so, double eps) {
-        int ns = steps_for_eps_is(eps, gbm.T);
-        DeviceBBData* dbb = bb_upload(bb_precompute(ns, gbm.T));
         QMCConfig c = qmc_cfg; c.seed += so;
-        MCResult r = run_qmc_is_cuda(gbm, payoff, z_star, eps, c,
-                                      NoiseMode::BrownianBridge, dbb);
-        bb_free(dbb);
-        return r;
+        return mc::run_qmc_is(gbm, payoff, z_star, eps, c,
+                                      NoiseMode::BrownianBridge);
     }});
     methods.push_back({"QMC+IS PCA", [&](unsigned so, double eps) {
-        int ns = steps_for_eps_is(eps, gbm.T);
-        DevicePCAData* dpca = pca_upload(pca_compute(ns, gbm.T));
         QMCConfig c = qmc_cfg; c.seed += so;
-        MCResult r = run_qmc_is_cuda(gbm, payoff, z_star, eps, c,
-                                      NoiseMode::PCA, nullptr, dpca);
-        pca_free(dpca);
-        return r;
+        return mc::run_qmc_is(gbm, payoff, z_star, eps, c,
+                                      NoiseMode::PCA);
     }});
     // Cambio 1: run_mlmc_is_cuda ahora usa el mismo patrón de streams
     // concurrentes por nivel que run_mlmc_cuda.
     methods.push_back({"MLMC + IS", [&](unsigned so, double eps) {
         MLMCConfig c = ml_cfg; c.seed += so;
-        return run_mlmc_is_cuda(gbm, payoff, z_star, eps, c);
+        return mc::run_mlmc_is(gbm, payoff, z_star, eps, c);
     }});
     // ── MLQMC + IS (NUEVO): 3 construcciones de trayectoria ──────────────────
     methods.push_back({"MLQMC+IS Raw", [&](unsigned so, double eps) {
         QMCConfig c = qmc_cfg; c.seed += so;
-        return run_mlqmc_is_cuda(gbm, payoff, z_star, eps, ml_cfg, c, NoiseMode::Raw);
+        return mc::run_mlqmc_is(gbm, payoff, z_star, eps, ml_cfg, c, NoiseMode::Raw);
     }});
     methods.push_back({"MLQMC+IS BB", [&](unsigned so, double eps) {
         QMCConfig c = qmc_cfg; c.seed += so;
-        return run_mlqmc_is_cuda(gbm, payoff, z_star, eps, ml_cfg, c,
-                                  NoiseMode::BrownianBridge, dev_bb_list);
+        return mc::run_mlqmc_is(gbm, payoff, z_star, eps, ml_cfg, c,
+                                  NoiseMode::BrownianBridge);
     }});
     methods.push_back({"MLQMC+IS PCA", [&](unsigned so, double eps) {
         QMCConfig c = qmc_cfg; c.seed += so;
-        return run_mlqmc_is_cuda(gbm, payoff, z_star, eps, ml_cfg, c,
-                                  NoiseMode::PCA, {}, dev_pca_list);
+        return mc::run_mlqmc_is(gbm, payoff, z_star, eps, ml_cfg, c,
+                                  NoiseMode::PCA);
     }});
 
     run_precision_sweep("ejemplo11_otm_is", methods, price_ref, eps_list);
 
     // ── Limpieza ─────────────────────────────────────────────────────────────
-    for (int l = 0; l <= L_MAX; ++l) {
-        bb_free(dev_bb_list[l]);
-        pca_free(dev_pca_list[l]);
-    }
     return 0;
 }

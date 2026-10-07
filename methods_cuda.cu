@@ -3641,3 +3641,10 @@ std::pair<double, double> run_mc_fixed(const ModelVariant& model,
                                        unsigned seed) {
     return run_mc_fixed_impl(model, payoff, n_steps, n_paths, seed);
 }
+
+
+// ¿Hay al menos un dispositivo CUDA utilizable? (usado por engine/ para elegir el backend)
+bool cuda_device_available() {
+    int n = 0;
+    return cudaGetDeviceCount(&n) == cudaSuccess && n > 0;
+}

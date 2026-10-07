@@ -1,5 +1,5 @@
 #include <cstdlib>
-#include "../methods_cuda.cuh"
+#include "common.hpp"
 #include <cmath>
 #include <algorithm>
 #include <vector>
@@ -14,6 +14,7 @@ static int steps_for_eps(double eps, double c1, double T) {
 }
 
 int main(int argc, char** argv) {
+    mc_examples::init(argc, argv);
     // ── Parámetros ───────────────────────────────────────────────────────────
     HestonParams hes;
     hes.S0    = 100.0;
@@ -35,11 +36,11 @@ int main(int argc, char** argv) {
     PayoffVariant pv = European{K, r, hes.T};
 
     // ── Referencia (MC 500k trayectorias con n_steps=256) ────────────────────
-    double price_ref = run_mc_fixed(mv, pv, 256, 500000, 99u).first;
+    double price_ref = mc::run_mc_fixed(mv, pv, 256, 500000, 99u).first;
 
     // ── c1 por Richardson ────────────────────────────────────────────────────
     auto sim_fn = [&](int ns, long long np, unsigned s) -> double {
-        return run_mc_fixed(mv, pv, ns, np, s).first;
+        return mc::run_mc_fixed(mv, pv, ns, np, s).first;
     };
     double c1 = estimar_c1_richardson(sim_fn, hes.T, 4, 20000);
 
@@ -65,20 +66,20 @@ int main(int argc, char** argv) {
     methods.push_back({"MC", [&](unsigned so, double eps) {
         int ns = steps_for_eps(eps, c1, hes.T);
         MCConfig c = mc_cfg; c.seed += so;
-        return run_mc_cuda(mv, pv, eps, ns, c);
+        return mc::run_mc(mv, pv, eps, ns, c);
     }});
     methods.push_back({"MLMC", [&](unsigned so, double eps) {
         MLMCConfig c = ml_cfg; c.seed += so;
-        return run_mlmc_cuda(mv, pv, eps, c);
+        return mc::run_mlmc(mv, pv, eps, c);
     }});
     methods.push_back({"QMC Raw", [&](unsigned so, double eps) {
         int ns = steps_for_eps(eps, c1, hes.T);
         QMCConfig c = qmc_cfg; c.seed += so;
-        return run_qmc_cuda(mv, pv, eps, ns, c, NoiseMode::Raw);
+        return mc::run_qmc(mv, pv, eps, ns, c, NoiseMode::Raw);
     }});
     methods.push_back({"MLQMC Raw", [&](unsigned so, double eps) {
         QMCConfig c = qmc_cfg; c.seed += so;
-        return run_mlqmc_cuda(mv, pv, eps, ml_cfg, c, NoiseMode::Raw);
+        return mc::run_mlqmc(mv, pv, eps, ml_cfg, c, NoiseMode::Raw);
     }});
 
     run_precision_sweep("ejemplo05_heston", methods, price_ref, eps_list);
