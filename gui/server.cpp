@@ -102,7 +102,10 @@ struct GuiServer::Impl {
         std::string path = raw_path == "/" ? "/index.html" : raw_path;
         if (path.find("..") != std::string::npos) { error_out(res, 400, "ruta inválida"); return; }
         if (!opt.web_dir.empty()) {
-            std::ifstream f(opt.web_dir + path, std::ios::binary);
+            // /vendor/* vive en third_party/echarts (junto al código, no dentro de gui/web)
+            const std::string file = path.rfind("/vendor/", 0) == 0
+                ? opt.web_dir + "/../../third_party/echarts" + path.substr(7) : opt.web_dir + path;
+            std::ifstream f(file, std::ios::binary);
             if (!f) { error_out(res, 404, "no encontrado"); return; }
             std::stringstream ss; ss << f.rdbuf();
             res.set_content(ss.str(), mime_of(path));

@@ -1,5 +1,5 @@
 # Genera un .cpp con los recursos web embebidos como arrays de bytes.
-#   cmake -DOUT=salida.cpp -DSPECS="ruta_origen|/ruta/url;..." [-DMIMES="..."] -P embed_assets.cmake
+#   cmake -DOUT=salida.cpp -DSPECS="ruta_origen|/ruta/url@@..." [-DMIMES="..."] -P embed_assets.cmake
 # Uso interno de CMakeLists.txt (la GUI se sirve desde el propio ejecutable, sin ficheros sueltos).
 
 function(mime_for url out_var)
@@ -22,7 +22,8 @@ endfunction()
 set(body "// ARCHIVO GENERADO por cmake/embed_assets.cmake -- no editar a mano.\n#include \"web_assets.hpp\"\n\nnamespace mc::gui {\nnamespace {\n")
 set(table "")
 set(idx 0)
-foreach(spec IN LISTS SPECS)
+string(REPLACE "@@" ";" SPEC_LIST "${SPECS}")
+foreach(spec IN LISTS SPEC_LIST)
     string(REPLACE "|" ";" parts "${spec}")
     list(GET parts 0 src)
     list(GET parts 1 url)

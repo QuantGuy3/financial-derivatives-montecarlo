@@ -18,7 +18,7 @@ foreach(spec IN LISTS MC_WEB_SPECS)
 endforeach()
 
 set(MC_WEB_ASSETS_CPP "${CMAKE_CURRENT_BINARY_DIR}/web_assets.cpp")
-string(REPLACE ";" "\;" MC_WEB_SPECS_ESC "${MC_WEB_SPECS}")
+list(JOIN MC_WEB_SPECS "@@" MC_WEB_SPECS_ESC)
 add_custom_command(
     OUTPUT "${MC_WEB_ASSETS_CPP}"
     COMMAND ${CMAKE_COMMAND} "-DOUT=${MC_WEB_ASSETS_CPP}" "-DSPECS=${MC_WEB_SPECS_ESC}"

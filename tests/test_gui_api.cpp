@@ -83,6 +83,22 @@ TEST_CASE("GUI: seguridad — token, Host y recursos estáticos") {
     CHECK(idx->status == 200);
     CHECK(idx->get_header_value("Content-Type").find("text/html") != std::string::npos);
 
+    // Todos los recursos de la interfaz están embebidos en el binario
+    for (const char* path : {"/assets/app.js", "/assets/charts.js", "/assets/api.js", "/assets/i18n.js",
+                             "/assets/style.css", "/vendor/echarts.min.js", "/favicon.svg"}) {
+        auto a = f.cli->Get(path);
+        REQUIRE_MESSAGE(a, path);
+        CHECK_MESSAGE(a->status == 200, path);
+        CHECK_MESSAGE(a->body.size() > 100, path);
+    }
+    auto js = f.cli->Get("/vendor/echarts.min.js");
+    REQUIRE(js);
+    CHECK(js->get_header_value("Content-Type").find("javascript") != std::string::npos);
+    CHECK(js->body.size() > 500000);
+    const int trav = f.cli->Get("/assets/../../etc/passwd")->status;   // sin escapes de ruta
+    CHECK((trav == 400 || trav == 404));
+    CHECK(f.cli->Get("/nada.txt")->status == 404);
+
     httplib::Client anon("127.0.0.1", f.port);
     auto r1 = anon.Get("/api/capabilities");
     REQUIRE(r1);

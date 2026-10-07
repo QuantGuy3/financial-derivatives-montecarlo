@@ -48,7 +48,7 @@ namespace {
 // con un mínimo de 40 ms entre eventos.
 class JobSink : public ProgressSink {
 public:
-    JobSink(Job& job) : job_(job), t0_(std::chrono::steady_clock::now()) {}
+    JobSink(Job& job, const ParsedRun& run) : job_(job), run_(run), t0_(std::chrono::steady_clock::now()) {}
 
     void on_snapshot(const Snapshot& s) override {
         const bool structural = (s.stage != Stage::Main);        // plan, piloto, niveles, duplicaciones, fin
@@ -60,6 +60,13 @@ public:
         last_n_ = s.n_done;
         last_t_ = now;
         json j = snapshot_json(s);
+        // La referencia de la Asian geométrica depende del nº de pasos: se adjunta al plan.
+        if (s.stage == Stage::Plan && s.n_steps > 0) {
+            try {
+                if (auto ref = reference_price(run_.model, run_.payoff, s.n_steps))
+                    j["reference"] = {{"value", ref->value}, {"kind", ref->kind}};
+            } catch (...) {}
+        }
         job_.push("progress", j);
     }
 
@@ -67,6 +74,7 @@ public:
 
 private:
     Job& job_;
+    const ParsedRun& run_;
     std::chrono::steady_clock::time_point t0_;
     long long last_n_ = 0;
     double last_t_ = -1.0;
@@ -155,10 +163,15 @@ void JobManager::run_job(const std::shared_ptr<Job>& job, const ParsedRun& run) 
     job->set_state("running");
     const int threads = run.opt.backend == mc::Backend::Cpu
         ? (run.opt.threads > 0 ? run.opt.threads : hw_threads_) : 1;
-    job->push("started", json{{"type", "started"}, {"job_id", job->id()}, {"threads", threads},
-                              {"backend", mc::backend_name(run.opt.backend)}, {"request", run.echo}});
+    json started{{"type", "started"}, {"job_id", job->id()}, {"threads", threads},
+                 {"backend", mc::backend_name(run.opt.backend)}, {"request", run.echo}};
+    try {   // referencia que no depende de la discretización (Black-Scholes, Heston)
+        if (auto ref0 = reference_price(run.model, run.payoff, 0))
+            started["reference"] = {{"value", ref0->value}, {"kind", ref0->kind}};
+    } catch (...) {}
+    job->push("started", started);
     try {
-        JobSink sink(*job);
+        JobSink sink(*job, run);
         mc::RunOptions opt = run.opt;
         opt.sink = &sink;
         mc::RunReport rep = mc::run(run.model, run.payoff, run.spec, opt);

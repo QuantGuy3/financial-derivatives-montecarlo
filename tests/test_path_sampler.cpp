@@ -121,3 +121,17 @@ TEST_CASE("sample_fan: percentiles ordenados y media cercana a S0 e^{mu t}") {
 }
 
 } // TEST_SUITE
+
+TEST_SUITE("fast") {
+
+TEST_CASE("sample_coupled: el payoff del par respeta el tipo de derivado (Asian: media de los pasos)") {
+    GBMParams g;
+    auto cp = sample_coupled(g, Asian{100.0}, 3, 2, 5u);
+    double sf = 0, sc = 0;
+    for (int k = 1; k <= 8; k++) sf += cp.S_fine[(size_t)k];
+    for (int k = 1; k <= 4; k++) sc += cp.S_coarse[(size_t)k];
+    CHECK(cp.payoff_fine == doctest::Approx(std::max(sf / 8 - 100.0, 0.0)).epsilon(1e-12));
+    CHECK(cp.payoff_coarse == doctest::Approx(std::max(sc / 4 - 100.0, 0.0)).epsilon(1e-12));
+}
+
+} // TEST_SUITE

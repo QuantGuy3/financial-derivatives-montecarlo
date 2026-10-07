@@ -206,7 +206,9 @@ CoupledPair sample_coupled(const ModelVariant& mv, const PayoffVariant& pv, int 
     for (int k = 0; k <= c.n_fine; k++) cp.t_fine[(size_t)k] = k * c.h_f;
     for (int k = 0; k <= c.n_coarse; k++) cp.t_coarse[(size_t)k] = k * c.h_c;
 
+    const PayoffEval pef{p, c.n_fine, c.h_f}, pec{p, c.n_coarse, c.h_c};
     double Sf = m.S0, Vf = m.v0, Sc = m.S0, Vc = m.v0, acc1 = 0.0, acc2 = 0.0;
+    double run_f = pef.init(m.S0), run_c = pec.init(m.S0);
     int ck = 0;
     for (int k = 0; k < c.n_fine; k++) {
         if (m.kind == ModelKind::GBM) {
@@ -222,6 +224,7 @@ CoupledPair sample_coupled(const ModelVariant& mv, const PayoffVariant& pv, int 
             euler_heston(m, Sf, Vf, a1, dw2, c.h_f, c.em_f);
         }
         cp.S_fine[(size_t)k + 1] = Sf;
+        pef.update(run_f, Sf);
         if ((k + 1) % M == 0) {
             if (m.kind == ModelKind::GBM) Sc = Sc + m.mu * Sc * c.h_c + m.sigma * Sc * acc1;
             else if (m.kind == ModelKind::Dupire) Sc = euler_dupire(m, Sc, acc1, c.h_c, std::exp(-m.alpha * (ck * c.h_c)), m.S0);
@@ -229,10 +232,11 @@ CoupledPair sample_coupled(const ModelVariant& mv, const PayoffVariant& pv, int 
             acc1 = acc2 = 0.0;
             ++ck;
             cp.S_coarse[(size_t)ck] = Sc;
+            pec.update(run_c, Sc);
         }
     }
-    cp.payoff_fine = terminal_payoff<PayoffKind::European>(p, Sf, 0.0, c.n_fine);
-    cp.payoff_coarse = terminal_payoff<PayoffKind::European>(p, Sc, 0.0, c.n_coarse);
+    cp.payoff_fine = pef.finish(Sf, run_f);
+    cp.payoff_coarse = pec.finish(Sc, run_c);
     return cp;
 }
 
