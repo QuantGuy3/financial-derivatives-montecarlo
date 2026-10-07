@@ -26,6 +26,10 @@ struct QMCConfig {
     // la observación 3.19 de la memoria (Owen, 1997).
     int R            = 32;
     int max_doublings = 20; // Máximo de duplicaciones del número de puntos
+    // Puntos por réplica de la primera ronda. La GPU arranca en min(chunk_cap, 4096) (valor por
+    // defecto, que ignora este campo); el motor CPU lo usa (redondeado a potencia de 2 con Sobol)
+    // y la GUI puede bajarlo (p. ej. 256) para dibujar curvas de convergencia más suaves.
+    int n0            = 4096;
     // Semilla base para el generador pseudoaleatorio / los scrambles Sobol.
     // Se usa como cfg.seed (Raw) o como sal de scramble por réplica (Sobol),
     // reemplazando la constante 42u que antes iba fija en el código: así los

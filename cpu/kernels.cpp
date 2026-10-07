@@ -59,4 +59,31 @@ void kernel_basket(const KCtx& c, const double* dW, int ld, double* Y, double* S
     }
 }
 
+namespace {
+
+template <ModelKind MK>
+struct CoupledRow {
+    static constexpr CoupledFn fns[kNumPayoffs] = {
+        &kernel_coupled<MK, PayoffKind::European>,
+        &kernel_coupled<MK, PayoffKind::Asian>,
+        &kernel_coupled<MK, PayoffKind::GeomAsian>,
+        &kernel_coupled<MK, PayoffKind::Lookback>,
+        &kernel_coupled<MK, PayoffKind::Barrier>,
+        &kernel_coupled<MK, PayoffKind::Basket>,
+    };
+};
+
+} // namespace
+
+CoupledFn select_coupled_kernel(ModelKind mk, PayoffKind pk) {
+    const int p = (int)pk;
+    switch (mk) {
+    case ModelKind::GBM:    return CoupledRow<ModelKind::GBM>::fns[p];
+    case ModelKind::Heston: return CoupledRow<ModelKind::Heston>::fns[p];
+    case ModelKind::Dupire: return CoupledRow<ModelKind::Dupire>::fns[p];
+    default: break;
+    }
+    throw std::invalid_argument("select_coupled_kernel: MLMC no admite cestas multi-activo");
+}
+
 } // namespace mc::cpu

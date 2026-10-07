@@ -81,6 +81,9 @@ add_library(mc_cpu STATIC
     cpu/kernels.cpp
     cpu/path_sim.cpp
     cpu/mc_cpu.cpp
+    cpu/qmc_noise.cpp
+    cpu/qmc_cpu.cpp
+    cpu/mlmc_cpu.cpp
 )
 target_include_directories(mc_cpu PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(mc_cpu PUBLIC mc_core PRIVATE mc_warnings)

@@ -155,4 +155,114 @@ using SingleFn = void (*)(const KCtx&, const double*, int, double*);
 // Núcleo [modelo x payoff] para GBM/Heston/Dupire (no MultiDupire).
 SingleFn select_single_kernel(ModelKind mk, PayoffKind pk);
 
+// ---- núcleo MLMC: caminos fino y grueso acoplados ----------------------------------------------------
+
+struct CKCtx {
+    const CpuModel*  m = nullptr;
+    const CpuPayoff* p = nullptr;
+    int    n_fine = 1, n_coarse = 0, M = 2;
+    double h_f = 1.0, h_c = 1.0;
+    double em_f = 1.0, em_c = 1.0;   // exp(-kappa h) fino/grueso (Heston)
+};
+
+inline CKCtx make_ckctx(const CpuModel& m, const CpuPayoff& p, int level, int M) {
+    CKCtx c;
+    c.m = &m; c.p = &p; c.M = M;
+    c.n_fine = 1;
+    for (int i = 0; i < level; i++) c.n_fine *= M;
+    c.n_coarse = (level == 0) ? 0 : c.n_fine / M;
+    c.h_f = m.T / c.n_fine;
+    c.h_c = m.T / std::max(c.n_coarse, 1);
+    c.em_f = std::exp(-m.kappa * c.h_f);
+    c.em_c = std::exp(-m.kappa * c.h_c);
+    return c;
+}
+
+// El mismo ruido fino alimenta ambos caminos: el grueso avanza cada M pasos finos con la SUMA de
+// los M incrementos finos (acoplamiento de Giles). Yc = 0 en el nivel 0 (sin grueso).
+// dW es el incremento fino ya escalado, layout [(k*dim+c)*ld + lane] como kernel_single.
+template <ModelKind MK, PayoffKind PK>
+void kernel_coupled(const CKCtx& c, const double* dW, int ld, double* Yf, double* Yc) {
+    constexpr int W = kLanes;
+    constexpr int dim = (MK == ModelKind::Heston) ? 2 : 1;
+    const CpuModel& m = *c.m;
+    const CpuPayoff& pp = *c.p;
+
+    double Sf[W], Vf[W], Sc[W], Vc[W], run_f[W], run_c[W], acc1[W], acc2[W];
+    for (int l = 0; l < W; l++) {
+        Sf[l] = Sc[l] = m.S0;
+        Vf[l] = Vc[l] = m.v0;
+        run_f[l] = run_c[l] = running_init<PK>(m.S0);
+        acc1[l] = acc2[l] = 0.0;
+    }
+    int coarse_k = 0;
+
+    for (int k = 0; k < c.n_fine; k++) {
+        const double* dw = dW + (size_t)k * dim * ld;
+        if constexpr (MK == ModelKind::GBM) {
+            for (int l = 0; l < W; l++) {
+                acc1[l] += dw[l];
+                Sf[l] = euler_gbm(m, Sf[l], dw[l], c.h_f);
+            }
+        } else if constexpr (MK == ModelKind::Dupire) {
+            const double e_t = std::exp(-m.alpha * (k * c.h_f));
+            for (int l = 0; l < W; l++) {
+                acc1[l] += dw[l];
+                Sf[l] = euler_dupire(m, Sf[l], dw[l], c.h_f, e_t, m.S0);
+            }
+        } else {
+            static_assert(MK == ModelKind::Heston);
+            for (int l = 0; l < W; l++) {
+                const double a1 = dw[l], a2 = dw[ld + l];
+                const double dw1 = a1, dw2 = m.l21 * a1 + m.l22 * a2;
+                acc1[l] += dw1; acc2[l] += dw2;
+                const double Vp = std::max(Vf[l], 0.0);
+                const double sq = std::sqrt(Vp);
+                Sf[l] = Sf[l] + m.mu * Sf[l] * c.h_f + sq * Sf[l] * dw1;
+                Vf[l] = m.theta + c.em_f * (Vf[l] - m.theta) + m.xi * sq * dw2;
+            }
+        }
+        if constexpr (is_path_dep<PK>)
+            for (int l = 0; l < W; l++) running_update<PK>(run_f[l], Sf[l]);
+
+        if ((k + 1) % c.M == 0) {
+            if constexpr (MK == ModelKind::GBM) {
+                for (int l = 0; l < W; l++) {
+                    Sc[l] = Sc[l] + m.mu * Sc[l] * c.h_c + m.sigma * Sc[l] * acc1[l];
+                    acc1[l] = 0.0;
+                }
+            } else if constexpr (MK == ModelKind::Dupire) {
+                const double e_t = std::exp(-m.alpha * (coarse_k * c.h_c));
+                for (int l = 0; l < W; l++) {
+                    Sc[l] = euler_dupire(m, Sc[l], acc1[l], c.h_c, e_t, m.S0);
+                    acc1[l] = 0.0;
+                }
+            } else {
+                for (int l = 0; l < W; l++) {
+                    const double Vp = std::max(Vc[l], 0.0);
+                    const double sq = std::sqrt(Vp);
+                    Sc[l] = Sc[l] + m.mu * Sc[l] * c.h_c + sq * Sc[l] * acc1[l];
+                    Vc[l] = m.theta + c.em_c * (Vc[l] - m.theta) + m.xi * sq * acc2[l];
+                    acc1[l] = acc2[l] = 0.0;
+                }
+            }
+            if constexpr (is_path_dep<PK>)
+                for (int l = 0; l < W; l++) running_update<PK>(run_c[l], Sc[l]);
+            ++coarse_k;
+        }
+    }
+    if constexpr (is_path_dep<PK>)
+        for (int l = 0; l < W; l++) {
+            apply_bgk<PK>(pp, run_f[l], c.h_f);
+            apply_bgk<PK>(pp, run_c[l], c.h_c);
+        }
+    for (int l = 0; l < W; l++) {
+        Yf[l] = terminal_payoff<PK>(pp, Sf[l], run_f[l], c.n_fine);
+        Yc[l] = (c.n_coarse > 0) ? terminal_payoff<PK>(pp, Sc[l], run_c[l], c.n_coarse) : 0.0;
+    }
+}
+
+using CoupledFn = void (*)(const CKCtx&, const double*, int, double*, double*);
+CoupledFn select_coupled_kernel(ModelKind mk, PayoffKind pk);
+
 } // namespace mc::cpu

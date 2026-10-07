@@ -64,11 +64,12 @@ void PathSim::run_chunk(uint64_t first, int count, Scratch& s, ChunkAcc& out) co
     if (multi_ && (int)s.S.size() < m_.n_assets * W) s.S.resize((size_t)m_.n_assets * W);
     double* Z = s.Z.data();
     double Y[W];
+    std::unique_ptr<NoiseStream> stream = noise_.open(first, (uint64_t)count);
 
     for (int b = 0; b < count; b += W) {
         const int n = std::min(W, count - b);
         if (n < W) std::memset(Z, 0, sizeof(double) * (size_t)D * W);   // carriles de relleno
-        noise_.fill(first + (uint64_t)b, n, Z, W);
+        stream->fill(n, Z, W);
         if (multi_) {
             if (!m_.uncorrelated) correlate_block(m_, Z, W, kc_.n_steps);
             kernel_basket(kc_, Z, W, Y, s.S.data());
@@ -77,6 +78,37 @@ void PathSim::run_chunk(uint64_t first, int count, Scratch& s, ChunkAcc& out) co
         }
         for (int l = 0; l < n; l++) {
             if (std::isfinite(Y[l])) out.acc.add(Y[l]);
+            else ++out.nonfinite;
+        }
+    }
+}
+
+CoupledSim::CoupledSim(const CpuModel& m, const CpuPayoff& p, int level, int M, const NoiseSource& noise)
+    : noise_(noise), kc_(make_ckctx(m, p, level, M)) {
+    if (m.kind == ModelKind::MultiDupire)
+        throw std::invalid_argument("MLMC: las cestas multi-activo no están soportadas");
+    if (noise.dim() != kc_.n_fine * m.noise_dim)
+        throw std::invalid_argument("CoupledSim: la dimensión de la fuente de ruido no coincide con n_fine*noise_dim");
+    fn_ = select_coupled_kernel(m.kind, p.kind);
+    chunk_paths_ = chunk_paths_for((double)kc_.n_fine * m.noise_dim * 1.5);
+}
+
+void CoupledSim::run_chunk(uint64_t first, int count, Scratch& s, ChunkAcc2& out) const {
+    constexpr int W = kLanes;
+    const int D = noise_.dim();
+    if ((int)s.Z.size() < D * W) s.Z.resize((size_t)D * W);
+    double* Z = s.Z.data();
+    double Yf[W], Yc[W];
+    std::unique_ptr<NoiseStream> stream = noise_.open(first, (uint64_t)count);
+
+    for (int b = 0; b < count; b += W) {
+        const int n = std::min(W, count - b);
+        if (n < W) std::memset(Z, 0, sizeof(double) * (size_t)D * W);
+        stream->fill(n, Z, W);
+        fn_(kc_, Z, W, Yf, Yc);
+        for (int l = 0; l < n; l++) {
+            const double dy = Yf[l] - Yc[l];
+            if (std::isfinite(dy) && std::isfinite(Yf[l])) { out.dY.add(dy); out.Yf.add(Yf[l]); }
             else ++out.nonfinite;
         }
     }

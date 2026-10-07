@@ -75,6 +75,30 @@ struct RangeResult {
 RangeResult simulate_range(ThreadPool& pool, const PathSim& sim, uint64_t first, long long N,
                            const std::function<bool(const Moments&, long long)>& on_wave);
 
+// ---- niveles MLMC (fino/grueso acoplados) ---------------------------------------------------------
+
+// Resultado de un chunk de un nivel: corrección dY = Yf - Yc y valor fino Yf.
+struct ChunkAcc2 {
+    ShiftedAcc dY, Yf;
+    long long nonfinite = 0;
+};
+
+class CoupledSim {
+public:
+    // noise.dim() debe ser n_fine * model.noise_dim y entregar el incremento FINO ya escalado.
+    CoupledSim(const CpuModel& m, const CpuPayoff& p, int level, int M, const NoiseSource& noise);
+
+    int n_fine() const { return kc_.n_fine; }
+    int chunk_paths() const { return chunk_paths_; }
+    void run_chunk(uint64_t first, int count, Scratch& s, ChunkAcc2& out) const;
+
+private:
+    const NoiseSource& noise_;
+    CKCtx kc_;
+    CoupledFn fn_ = nullptr;
+    int chunk_paths_ = 64;
+};
+
 using Clock = std::chrono::steady_clock;
 inline double seconds_since(Clock::time_point t0) {
     return std::chrono::duration<double>(Clock::now() - t0).count();

@@ -1,0 +1,26 @@
+{
+  "machine": {"cpu": "AMD Ryzen 7 7730U (8C/16T)", "hw_threads": 16, "compiler": "gcc 15.2.0", "flags": " -O3 -DNDEBUG ", "commit": "41e31b7"},
+  "reps": 7,
+  "results": [
+    {"id": "W1_gbm_euro_64", "threads": 1, "paths": 4.1943e+06, "steps": 64, "median_s": 4.34755, "min_s": 4.28092, "q1_s": 4.31576, "q3_s": 4.43406, "cv_pct": 2.69655, "mpaths_per_s": 0.964752},
+    {"id": "W1_gbm_euro_64", "threads": 2, "paths": 4.1943e+06, "steps": 64, "median_s": 2.78947, "min_s": 2.70251, "q1_s": 2.75034, "q3_s": 2.81473, "cv_pct": 2.08684, "mpaths_per_s": 1.50362},
+    {"id": "W1_gbm_euro_64", "threads": 4, "paths": 4.1943e+06, "steps": 64, "median_s": 1.47856, "min_s": 1.43354, "q1_s": 1.45791, "q3_s": 1.48056, "cv_pct": 1.39726, "mpaths_per_s": 2.83676},
+    {"id": "W1_gbm_euro_64", "threads": 8, "paths": 4.1943e+06, "steps": 64, "median_s": 0.801374, "min_s": 0.792065, "q1_s": 0.799879, "q3_s": 0.805894, "cv_pct": 0.883208, "mpaths_per_s": 5.23389},
+    {"id": "W1_gbm_euro_64", "threads": 16, "paths": 4.1943e+06, "steps": 64, "median_s": 0.578602, "min_s": 0.519017, "q1_s": 0.545242, "q3_s": 0.592482, "cv_pct": 6.4972, "mpaths_per_s": 7.24903},
+    {"id": "W2_gbm_asian_256", "threads": 1, "paths": 1.04858e+06, "steps": 256, "median_s": 4.2876, "min_s": 4.22571, "q1_s": 4.25551, "q3_s": 4.40945, "cv_pct": 2.44389, "mpaths_per_s": 0.24456},
+    {"id": "W2_gbm_asian_256", "threads": 2, "paths": 1.04858e+06, "steps": 256, "median_s": 2.74382, "min_s": 2.65197, "q1_s": 2.73683, "q3_s": 2.76715, "cv_pct": 2.14429, "mpaths_per_s": 0.382159},
+    {"id": "W2_gbm_asian_256", "threads": 4, "paths": 1.04858e+06, "steps": 256, "median_s": 1.47139, "min_s": 1.43117, "q1_s": 1.46425, "q3_s": 1.47456, "cv_pct": 1.10896, "mpaths_per_s": 0.712645},
+    {"id": "W2_gbm_asian_256", "threads": 8, "paths": 1.04858e+06, "steps": 256, "median_s": 0.796825, "min_s": 0.783643, "q1_s": 0.792395, "q3_s": 0.804735, "cv_pct": 1.26324, "mpaths_per_s": 1.31594},
+    {"id": "W2_gbm_asian_256", "threads": 16, "paths": 1.04858e+06, "steps": 256, "median_s": 0.56006, "min_s": 0.524626, "q1_s": 0.550769, "q3_s": 0.565492, "cv_pct": 2.95291, "mpaths_per_s": 1.87226},
+    {"id": "W3_dupire_euro_256", "threads": 1, "paths": 524288, "steps": 256, "median_s": 4.81049, "min_s": 4.72355, "q1_s": 4.79245, "q3_s": 4.96893, "cv_pct": 2.96451, "mpaths_per_s": 0.108988},
+    {"id": "W3_dupire_euro_256", "threads": 2, "paths": 524288, "steps": 256, "median_s": 3.08601, "min_s": 2.68148, "q1_s": 3.00922, "q3_s": 3.19346, "cv_pct": 7.25047, "mpaths_per_s": 0.169892},
+    {"id": "W3_dupire_euro_256", "threads": 4, "paths": 524288, "steps": 256, "median_s": 1.74036, "min_s": 1.61399, "q1_s": 1.69946, "q3_s": 1.74839, "cv_pct": 3.73297, "mpaths_per_s": 0.301252},
+    {"id": "W3_dupire_euro_256", "threads": 8, "paths": 524288, "steps": 256, "median_s": 0.964325, "min_s": 0.949035, "q1_s": 0.962484, "q3_s": 0.969989, "cv_pct": 1.28442, "mpaths_per_s": 0.543684},
+    {"id": "W3_dupire_euro_256", "threads": 16, "paths": 524288, "steps": 256, "median_s": 0.687315, "min_s": 0.679949, "q1_s": 0.682747, "q3_s": 0.722695, "cv_pct": 5.48105, "mpaths_per_s": 0.762805},
+    {"id": "W4_heston_euro_128", "threads": 1, "paths": 1.04858e+06, "steps": 256, "median_s": 4.79353, "min_s": 4.61781, "q1_s": 4.69542, "q3_s": 4.81666, "cv_pct": 2.5666, "mpaths_per_s": 0.218748},
+    {"id": "W4_heston_euro_128", "threads": 2, "paths": 1.04858e+06, "steps": 256, "median_s": 2.94472, "min_s": 2.87206, "q1_s": 2.93281, "q3_s": 3.04566, "cv_pct": 2.66801, "mpaths_per_s": 0.356087},
+    {"id": "W4_heston_euro_128", "threads": 4, "paths": 1.04858e+06, "steps": 256, "median_s": 1.52646, "min_s": 1.4684, "q1_s": 1.50688, "q3_s": 1.54084, "cv_pct": 2.05036, "mpaths_per_s": 0.686934},
+    {"id": "W4_heston_euro_128", "threads": 8, "paths": 1.04858e+06, "steps": 256, "median_s": 0.81713, "min_s": 0.805964, "q1_s": 0.809621, "q3_s": 0.825267, "cv_pct": 1.14478, "mpaths_per_s": 1.28324},
+    {"id": "W4_heston_euro_128", "threads": 16, "paths": 1.04858e+06, "steps": 256, "median_s": 0.562751, "min_s": 0.549807, "q1_s": 0.5575, "q3_s": 0.59268, "cv_pct": 5.36308, "mpaths_per_s": 1.8633}
+  ]
+}
