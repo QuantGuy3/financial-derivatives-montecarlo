@@ -106,6 +106,15 @@ inline double euler_dupire(const CpuModel& m, double S, double dw, double h, dou
     return Sn > 0.0 ? Sn : 0.0;
 }
 
+// Heston: S usa la varianza ANTES de actualizar; V se actualiza con el esquema exacto en media
+// (Milstein exacto en v, como d_euler_heston). dw1, dw2 son los incrementos YA correlacionados.
+inline void euler_heston(const CpuModel& m, double& S, double& V, double dw1, double dw2, double h, double em) {
+    const double Vp = std::max(V, 0.0);
+    const double sq = std::sqrt(Vp);
+    S = S + m.mu * S * h + sq * S * dw1;
+    V = m.theta + em * (V - m.theta) + m.xi * sq * dw2;
+}
+
 // ---- núcleo de un bloque ---------------------------------------------------------------------
 
 template <ModelKind MK, PayoffKind PK>
@@ -132,17 +141,10 @@ void kernel_single(const KCtx& c, const double* dW, int ld, double* Y) {
             for (int l = 0; l < W; l++) S[l] = euler_dupire(m, S[l], dw[l], h, e_t, m.S0);
         } else {
             static_assert(MK == ModelKind::Heston);
-            // S usa la varianza ANTES de actualizar; V se actualiza con el esquema exacto en
-            // media (Milstein exacto en v, como d_euler_heston).
             for (int l = 0; l < W; l++) {
                 const double a1 = dw[l];
                 const double a2 = dw[ld + l];
-                const double dw1 = a1;
-                const double dw2 = m.l21 * a1 + m.l22 * a2;
-                const double Vp = std::max(V[l], 0.0);
-                const double sq = std::sqrt(Vp);
-                S[l] = S[l] + m.mu * S[l] * h + sq * S[l] * dw1;
-                V[l] = m.theta + c.em * (V[l] - m.theta) + m.xi * sq * dw2;
+                euler_heston(m, S[l], V[l], a1, m.l21 * a1 + m.l22 * a2, h, c.em);
             }
         }
         if constexpr (is_path_dep<PK>)
@@ -226,10 +228,7 @@ void kernel_coupled(const CKCtx& c, const double* dW, int ld, double* Yf, double
                 const double a1 = dw[l], a2 = dw[ld + l];
                 const double dw1 = a1, dw2 = m.l21 * a1 + m.l22 * a2;
                 acc1[l] += dw1; acc2[l] += dw2;
-                const double Vp = std::max(Vf[l], 0.0);
-                const double sq = std::sqrt(Vp);
-                Sf[l] = Sf[l] + m.mu * Sf[l] * c.h_f + sq * Sf[l] * dw1;
-                Vf[l] = m.theta + c.em_f * (Vf[l] - m.theta) + m.xi * sq * dw2;
+                euler_heston(m, Sf[l], Vf[l], dw1, dw2, c.h_f, c.em_f);
             }
         }
         if constexpr (is_path_dep<PK>)
@@ -249,10 +248,7 @@ void kernel_coupled(const CKCtx& c, const double* dW, int ld, double* Yf, double
                 }
             } else {
                 for (int l = 0; l < W; l++) {
-                    const double Vp = std::max(Vc[l], 0.0);
-                    const double sq = std::sqrt(Vp);
-                    Sc[l] = Sc[l] + m.mu * Sc[l] * c.h_c + sq * Sc[l] * acc1[l];
-                    Vc[l] = m.theta + c.em_c * (Vc[l] - m.theta) + m.xi * sq * acc2[l];
+                    euler_heston(m, Sc[l], Vc[l], acc1[l], acc2[l], c.h_c, c.em_c);
                     acc1[l] = acc2[l] = 0.0;
                 }
             }

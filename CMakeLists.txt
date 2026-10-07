@@ -61,7 +61,7 @@ endif()
 # ---------------------------------------------------------------------------
 # Núcleo: tipos, fórmulas analíticas, BB/PCA (CPU), estadísticos, barrido
 # ---------------------------------------------------------------------------
-add_library(mc_core STATIC utils.cpp sweep.cpp)
+add_library(mc_core STATIC utils.cpp sweep.cpp reference_prices.cpp)
 target_include_directories(mc_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(mc_core PUBLIC Threads::Threads PRIVATE mc_warnings)
 
@@ -85,6 +85,7 @@ add_library(mc_cpu STATIC
     cpu/qmc_cpu.cpp
     cpu/mlmc_cpu.cpp
     cpu/vr_cpu.cpp
+    cpu/path_sampler.cpp
 )
 target_include_directories(mc_cpu PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(mc_cpu PUBLIC mc_core PRIVATE mc_warnings)
