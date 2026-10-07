@@ -1,0 +1,17 @@
+# Builds
+build/
+build-*/
+out/
+cmake-build-*/
+CMakeUserPresets.json
+
+# Resultados de benchmarks locales (los informes curados se versionan en docs/perf)
+bench/results/*.json
+!bench/results/.gitkeep
+
+# Python / editores
+__pycache__/
+*.pyc
+.vscode/
+.idea/
+*.swp
