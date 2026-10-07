@@ -118,6 +118,14 @@ RunReport run(const ModelVariant& model, const PayoffVariant& payoff, const RunS
     const bool ml = (spec.family == Family::MLMC || spec.family == Family::MLQMC);
     const bool single_level = !ml;
 
+    auto emit_plan = [&](int n_steps_now) {
+        if (!opt_in.sink) return;
+        Snapshot sn;
+        sn.stage = Stage::Plan; sn.eps_target = spec.eps; sn.n_steps = n_steps_now;
+        opt_in.sink->on_snapshot(sn);
+    };
+    emit_plan(0);
+
     // ---- pasos --------------------------------------------------------------------------------
     int ns = spec.n_steps;
     double c1 = 0.0;
@@ -131,6 +139,7 @@ RunReport run(const ModelVariant& model, const PayoffVariant& payoff, const RunS
     }
     rep.n_steps = single_level ? ns : 0;
     rep.c1 = c1;
+    emit_plan(rep.n_steps);
 
     // ---- despacho -----------------------------------------------------------------------------
     switch (spec.variance) {

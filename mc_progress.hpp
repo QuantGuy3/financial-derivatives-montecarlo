@@ -33,6 +33,7 @@ struct Snapshot {
     double    mean = 0.0;            // estimación actual del precio
     double    std_error = 0.0;       // error estándar actual
     double    eps_target = 0.0;
+    int       n_steps = 0;           // pasos de la planificación (MC/QMC; 0 si no aplica o aún no se conoce)
     // MLMC / MLMC-QMC
     int              L = -1;
     const LevelStat* levels = nullptr;

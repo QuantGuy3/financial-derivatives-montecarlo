@@ -19,6 +19,7 @@ set(MC_ARCH "" CACHE STRING "Opt-in: 'native' compila el motor CPU con -march=na
 option(MC_BUILD_TESTS    "Compilar la suite de tests (doctest)" ON)
 option(MC_BUILD_EXAMPLES "Compilar los ejemplos (backend CPU y, si hay nvcc, GPU)" ON)
 option(MC_BUILD_BENCH    "Compilar bench_cpu (benchmarks del motor CPU)" ON)
+option(MC_BUILD_GUI      "Compilar mc_gui (interfaz web local)" ON)
 
 # ---------------------------------------------------------------------------
 # CUDA opcional: el build solo-CPU debe funcionar sin nvcc, sin Eigen ni lapack.
@@ -166,4 +167,11 @@ endif()
 # ---------------------------------------------------------------------------
 if(MC_BUILD_BENCH)
     add_subdirectory(bench)
+endif()
+
+# ---------------------------------------------------------------------------
+# GUI: servidor HTTP local + interfaz web embebida
+# ---------------------------------------------------------------------------
+if(MC_BUILD_GUI)
+    add_subdirectory(gui)
 endif()
