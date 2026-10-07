@@ -12,6 +12,9 @@ import json
 import pathlib
 import sys
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")   # la consola de Windows no es UTF-8 por defecto
+
 
 def load(path):
     d = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))

@@ -4,6 +4,7 @@
 //
 // Uso: bench_micro [--filter texto] [--reps N] [--json fichero]
 
+#include "../cpu/mc_cpu.hpp"
 #include "../cpu/noise.hpp"
 #include "../cpu/normal.hpp"
 #include "../cpu/qmc_noise.hpp"
@@ -93,6 +94,29 @@ void bench_pow() {
     double a_pow = best_of(reps, [&] { double a = 0; for (int i = 0; i < N; i++) a += std::pow(x[(size_t)i], b); g_sink = a; }) / N * 1e9;
     double a_exp = best_of(reps, [&] { double a = 0; for (int i = 0; i < N; i++) a += std::exp(b * std::log(x[(size_t)i])); g_sink = a; }) / N * 1e9;
     report("potencia (S/S0)^(beta-1) (ns/llamada)", {{"std::pow", a_pow}, {"std::exp(b*std::log(x))", a_exp}});
+}
+
+// --- 1d. De extremo a extremo (1 hilo), A/B INTERCALADO: robusto frente a cambios de frecuencia de la CPU ----------
+void bench_e2e() {
+    if (!selected("e2e")) return;
+    GBMParams g; PayoffVariant pv = European{100.0, 0.05, 1.0};
+    const long long N = 1 << 19;
+    const int steps = 64;
+    auto timed = [&](NormalMethod m) {
+        mc::cpu::CpuOptions o; o.normal = m; o.threads = 1;
+        auto t0 = std::chrono::steady_clock::now();
+        auto r = mc::cpu::run_mc_fixed(g, pv, steps, N, 1u, o);
+        g_sink = r.first;
+        return std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    };
+    double best_bm = 1e300, best_zig = 1e300;
+    timed(NormalMethod::Ziggurat);     // calentamiento
+    for (int i = 0; i < reps; i++) {
+        best_bm = std::min(best_bm, timed(NormalMethod::BoxMuller));
+        best_zig = std::min(best_zig, timed(NormalMethod::Ziggurat));
+    }
+    const double per_step = 1e9 / ((double)N * steps);
+    report("MC GBM europea 64 pasos 1 hilo (ns/paso)", {{"Box-Muller", best_bm * per_step}, {"Ziggurat", best_zig * per_step}});
 }
 
 // --- 2. Sobol scrambleado: versión ingenua de la GPU frente a Gray-code con V' = L·V ------------------------
@@ -256,6 +280,7 @@ int main(int argc, char** argv) {
     }
     std::printf("bench_micro (un hilo, mejor de %d repeticiones)\n", reps);
     bench_normals();
+    bench_e2e();
     bench_pow();
     bench_sobol();
     bench_transforms();
