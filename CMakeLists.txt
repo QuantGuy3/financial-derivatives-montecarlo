@@ -18,6 +18,7 @@ set_property(CACHE MC_ENABLE_CUDA PROPERTY STRINGS AUTO ON OFF)
 set(MC_ARCH "" CACHE STRING "Opt-in: 'native' compila el motor CPU con -march=native")
 option(MC_BUILD_TESTS    "Compilar la suite de tests (doctest)" ON)
 option(MC_BUILD_EXAMPLES "Compilar los ejemplos (hoy requieren CUDA)" ON)
+option(MC_BUILD_BENCH    "Compilar bench_cpu (benchmarks del motor CPU)" ON)
 
 # ---------------------------------------------------------------------------
 # CUDA opcional: el build solo-CPU debe funcionar sin nvcc, sin Eigen ni lapack.
@@ -131,4 +132,11 @@ endif()
 if(MC_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
+endif()
+
+# ---------------------------------------------------------------------------
+# Benchmarks
+# ---------------------------------------------------------------------------
+if(MC_BUILD_BENCH)
+    add_subdirectory(bench)
 endif()
