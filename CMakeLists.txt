@@ -16,6 +16,7 @@ endif()
 set(MC_ENABLE_CUDA "AUTO" CACHE STRING "Backend CUDA: AUTO (si hay nvcc), ON (obligatorio) u OFF")
 set_property(CACHE MC_ENABLE_CUDA PROPERTY STRINGS AUTO ON OFF)
 set(MC_ARCH "" CACHE STRING "Opt-in: 'native' compila el motor CPU con -march=native")
+set(MC_LANES 8 CACHE STRING "Caminos simulados en paso sincronizado por bloque (1, 2, 4, 8, 16)")
 option(MC_BUILD_TESTS    "Compilar la suite de tests (doctest)" ON)
 option(MC_BUILD_EXAMPLES "Compilar los ejemplos (backend CPU y, si hay nvcc, GPU)" ON)
 option(MC_BUILD_BENCH    "Compilar bench_cpu (benchmarks del motor CPU)" ON)
@@ -89,6 +90,7 @@ add_library(mc_cpu STATIC
     cpu/path_sampler.cpp
 )
 target_include_directories(mc_cpu PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(mc_cpu PUBLIC MC_LANES=${MC_LANES})
 target_link_libraries(mc_cpu PUBLIC mc_core PRIVATE mc_warnings)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(mc_cpu PRIVATE -ffp-contract=off)
@@ -108,6 +110,10 @@ if(MC_HAS_CUDA)
     target_compile_options(mc_cuda PRIVATE
         $<$<COMPILE_LANGUAGE:CUDA>:--use_fast_math -O3 -lineinfo>)
     target_link_libraries(mc_cuda PUBLIC cublas curand mc_core)
+
+    # Volcado de los puntos Sobol de cuRAND para contrastarlos con la CPU (tools/colab_validate.sh)
+    add_executable(sobol_dump tools/sobol_dump.cu)
+    target_link_libraries(sobol_dump PRIVATE curand)
 endif()
 
 # ---------------------------------------------------------------------------

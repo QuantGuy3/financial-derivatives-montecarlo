@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - run: cmake --preset linux-tsan
+      - run: cmake --preset linux-tsan -DMC_BUILD_GUI=OFF -DMC_BUILD_BENCH=OFF
       - run: cmake --build --preset linux-tsan
       - run: ctest --preset linux-tsan -L fast
 

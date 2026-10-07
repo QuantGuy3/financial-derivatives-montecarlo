@@ -6,7 +6,7 @@
 // información de la máquina/compilación/commit (tools/bench_report.py lo convierte en
 // docs/perf/*.md).
 //
-// Uso:  bench_cpu [--filter texto] [--reps N] [--threads a,b,c] [--json fichero] [--quick] [--list]
+// Uso:  bench_cpu [--filter texto[,texto...]] [--reps N] [--threads a,b,c] [--json fichero] [--quick] [--list]
 
 #include "../cpu/mc_cpu.hpp"
 #include "../cpu/thread_pool.hpp"
@@ -141,7 +141,12 @@ int main(int argc, char** argv) {
 
     std::vector<Row> rows;
     for (auto& w : workloads) {
-        if (!filter.empty() && w.id.find(filter) == std::string::npos) continue;
+        if (!filter.empty()) {   // --filter acepta una lista separada por comas (basta que coincida una)
+            bool match = false;
+            std::stringstream fs(filter); std::string tok;
+            while (std::getline(fs, tok, ',')) if (!tok.empty() && w.id.find(tok) != std::string::npos) match = true;
+            if (!match) continue;
+        }
         for (int th : (w.single_thread_only ? std::vector<int>{1} : thread_list)) {
             mc::cpu::set_num_threads(th);
             for (int i = 0; i < 2; i++) w.run();   // calentamiento

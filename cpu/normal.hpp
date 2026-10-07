@@ -19,6 +19,7 @@ inline double norm_cdf(double x) { return 0.5 * std::erfc(-x / std::sqrt(2.0)); 
 enum class NormalMethod {
     BoxMuller,    // 2 uniformes -> 2 normales (log, sqrt, sincos)
     InverseCdf,   // 1 uniforme -> 1 normal (AS 241)
+    Ziggurat,     // Marsaglia-Tsang con 256 capas: ~1 palabra aleatoria por normal, sin funciones transcendentes
 };
 
 // Rellena z[0..n) con normales N(0,1) i.i.d. consumiendo el generador g.

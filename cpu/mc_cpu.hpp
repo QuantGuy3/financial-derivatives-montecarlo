@@ -25,7 +25,7 @@ struct CpuOptions {
     int           threads = 0;        // >0: fija el tamaño del pool global antes de empezar; 0: el actual
     ProgressSink* sink = nullptr;     // progreso en vivo y cancelación (hilo coordinador)
     double        max_seconds = 0.0;  // >0: tope de tiempo; devuelve el resultado parcial (truncated)
-    NormalMethod  normal = NormalMethod::BoxMuller;
+    NormalMethod  normal = NormalMethod::Ziggurat;   // 4.9x más rápido que Box-Muller (docs/perf)
     RunInfo*      info = nullptr;
 };
 

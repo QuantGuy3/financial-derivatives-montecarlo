@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <vector>
 
 using namespace mc::cpu;
@@ -116,7 +117,7 @@ TEST_CASE("normales por camino: caminos consecutivos no estan correlacionados") 
 TEST_SUITE("stat") {
 
 TEST_CASE("fill_normals: momentos y KS (Box-Muller y CDF inversa)") {
-    for (auto m : {NormalMethod::BoxMuller, NormalMethod::InverseCdf}) {
+    for (auto m : {NormalMethod::BoxMuller, NormalMethod::InverseCdf, NormalMethod::Ziggurat}) {
         for (int per_path : {1, 2, 7, 64}) {      // incluye n impar
             const size_t n_paths = 2000000 / per_path;
             auto x = gen_normals(m, n_paths, per_path, 12345);
@@ -130,6 +131,20 @@ TEST_CASE("fill_normals: momentos y KS (Box-Muller y CDF inversa)") {
         auto y = gen_normals(m, 20000, 5, 999);   // 100000 normales
         CHECK(ks_statistic(y) < 1.95 / std::sqrt((double)y.size()));   // p > 1e-3
     }
+}
+
+TEST_CASE("Ziggurat: colas y cuña correctas (fracciones de |z| > c frente a la normal)") {
+    const size_t N = 8000000;
+    auto x = gen_normals(NormalMethod::Ziggurat, N / 4, 4, 31337);
+    for (double c : {1.0, 2.0, 3.0, 3.6541528853610088, 4.0}) {      // 3.654... = R, el inicio de la cola
+        size_t cnt = 0; for (double v : x) if (std::abs(v) > c) ++cnt;
+        const double p = 2.0 * (1.0 - norm_cdf(c));
+        const double se = std::sqrt(p * (1 - p) / (double)N);
+        CHECK_MESSAGE(std::abs((double)cnt / N - p) < 5.0 * se, "c=" << c << " frac=" << (double)cnt / N << " esperado=" << p);
+    }
+    double mx = 0; for (double v : x) mx = std::max(mx, std::abs(v));
+    CHECK(mx > 4.5);              // la cola se alcanza
+    CHECK(mx < 7.0);
 }
 
 TEST_CASE("fill_normals: los elementos de un mismo camino no estan correlacionados") {

@@ -41,7 +41,7 @@ public:
 class RngNoise final : public NoiseSource {
 public:
     RngNoise(uint64_t seed, Stream stream, uint64_t level, int D, double scale,
-             NormalMethod method = NormalMethod::BoxMuller)
+             NormalMethod method = NormalMethod::Ziggurat)
         : seed_(seed), stream_(stream), level_(level), D_(D), scale_(scale), method_(method) {}
     int dim() const override { return D_; }
     std::unique_ptr<NoiseStream> open(uint64_t first_path, uint64_t count) const override;

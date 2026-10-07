@@ -1,13 +1,19 @@
 {
   "version": 6,
-  "cmakeMinimumRequired": { "major": 3, "minor": 22, "patch": 0 },
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 22,
+    "patch": 0
+  },
   "configurePresets": [
     {
       "name": "base",
       "hidden": true,
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/${presetName}",
-      "cacheVariables": { "MC_ENABLE_CUDA": "AUTO" }
+      "cacheVariables": {
+        "MC_ENABLE_CUDA": "AUTO"
+      }
     },
     {
       "name": "mingw-release",
@@ -30,10 +36,20 @@
       }
     },
     {
+      "name": "mingw-native",
+      "displayName": "MinGW g++ (Release, -march=native)",
+      "inherits": "mingw-release",
+      "cacheVariables": {
+        "MC_ARCH": "native"
+      }
+    },
+    {
       "name": "linux-release",
       "displayName": "Linux (Release, CUDA automático)",
       "inherits": "base",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
     },
     {
       "name": "linux-tsan",
@@ -50,42 +66,81 @@
       "displayName": "MSVC (Release)",
       "generator": "Ninja Multi-Config",
       "binaryDir": "${sourceDir}/build/${presetName}",
-      "cacheVariables": { "MC_ENABLE_CUDA": "OFF" }
+      "cacheVariables": {
+        "MC_ENABLE_CUDA": "OFF"
+      }
     }
   ],
   "buildPresets": [
-    { "name": "mingw-release", "configurePreset": "mingw-release" },
-    { "name": "mingw-debug", "configurePreset": "mingw-debug" },
-    { "name": "linux-release", "configurePreset": "linux-release" },
-    { "name": "linux-tsan", "configurePreset": "linux-tsan" },
-    { "name": "msvc-release", "configurePreset": "msvc-release", "configuration": "Release" }
+    {
+      "name": "mingw-release",
+      "configurePreset": "mingw-release"
+    },
+    {
+      "name": "mingw-native",
+      "configurePreset": "mingw-native"
+    },
+    {
+      "name": "mingw-debug",
+      "configurePreset": "mingw-debug"
+    },
+    {
+      "name": "linux-release",
+      "configurePreset": "linux-release"
+    },
+    {
+      "name": "linux-tsan",
+      "configurePreset": "linux-tsan"
+    },
+    {
+      "name": "msvc-release",
+      "configurePreset": "msvc-release",
+      "configuration": "Release"
+    }
   ],
   "testPresets": [
     {
       "name": "mingw-release",
       "configurePreset": "mingw-release",
-      "output": { "outputOnFailure": true }
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "mingw-native",
+      "configurePreset": "mingw-native",
+      "output": {
+        "outputOnFailure": true
+      }
     },
     {
       "name": "mingw-debug",
       "configurePreset": "mingw-debug",
-      "output": { "outputOnFailure": true }
+      "output": {
+        "outputOnFailure": true
+      }
     },
     {
       "name": "linux-release",
       "configurePreset": "linux-release",
-      "output": { "outputOnFailure": true }
+      "output": {
+        "outputOnFailure": true
+      }
     },
     {
       "name": "linux-tsan",
       "configurePreset": "linux-tsan",
-      "output": { "outputOnFailure": true }
+      "output": {
+        "outputOnFailure": true
+      }
     },
     {
       "name": "msvc-release",
       "configurePreset": "msvc-release",
       "configuration": "Release",
-      "output": { "outputOnFailure": true }
+      "output": {
+        "outputOnFailure": true
+      }
     }
   ]
 }

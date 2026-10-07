@@ -59,9 +59,9 @@ struct Xoshiro256pp {
     }
 
     // U[0,1) con 53 bits
-    inline double uniform() { return (double)(next() >> 11) * 0x1.0p-53; }
+    inline double uniform() { return (double)(next() >> 11) * (1.0 / 9007199254740992.0); }
     // U(0,1) estricto: nunca 0 ni 1 (seguro para log y para la inversa de la normal)
-    inline double uniform_open() { return ((double)(next() >> 11) + 0.5) * 0x1.0p-53; }
+    inline double uniform_open() { return ((double)(next() >> 11) + 0.5) * (1.0 / 9007199254740992.0); }
 
     // Estado derivado de la tupla (semilla, flujo, nivel, camino).
     static inline Xoshiro256pp for_path(uint64_t seed, Stream stream, uint64_t level, uint64_t path) {

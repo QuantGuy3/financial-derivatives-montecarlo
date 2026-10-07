@@ -18,3 +18,6 @@ target_link_libraries(bench_cpu PRIVATE mc_cpu mc_core mc_warnings)
 target_compile_definitions(bench_cpu PRIVATE
     MC_GIT_HASH="${MC_GIT_HASH}"
     MC_BUILD_FLAGS="${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_RELEASE} ${MC_ARCH}")
+
+add_executable(bench_micro bench_micro.cpp)
+target_link_libraries(bench_micro PRIVATE mc_cpu mc_core mc_warnings)

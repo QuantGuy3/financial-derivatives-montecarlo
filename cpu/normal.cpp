@@ -67,6 +67,57 @@ double norm_inv_cdf(double p) {
     return (q < 0.0) ? -val : val;
 }
 
+// ---- Ziggurat (Marsaglia & Tsang 2000, 256 capas) ------------------------------------------------------------
+//
+// El 98.8 % de las veces basta una multiplicación y una comparación; solo se evalúa exp en la cuña
+// (~1.2 %) y log en la cola (~0.03 %). Constantes de la tabla de 256 capas:
+//   R = 3.6541528853610088 (abscisa de la última capa), V = 0.00492867323399 (área de cada capa).
+
+namespace {
+
+struct ZigTables {
+    static constexpr double R = 3.6541528853610088;
+    static constexpr double V = 0.00492867323399;
+    double x[257];
+    double f[257];
+
+    ZigTables() {
+        auto pdf = [](double v) { return std::exp(-0.5 * v * v); };
+        x[0] = V / pdf(R);
+        x[1] = R;
+        for (int i = 2; i < 256; i++) x[i] = std::sqrt(-2.0 * std::log(V / x[i - 1] + pdf(x[i - 1])));
+        x[256] = 0.0;
+        for (int i = 0; i <= 256; i++) f[i] = pdf(x[i]);
+    }
+};
+
+const ZigTables& zig_tables() {
+    static const ZigTables t;
+    return t;
+}
+
+inline double zig_normal(Xoshiro256pp& g, const ZigTables& T) {
+    for (;;) {
+        const uint64_t bits = g.next();
+        const int i = (int)(bits & 0xFF);
+        // 53 bits con signo -> u en [-1, 1)
+        const double u = (double)((int64_t)bits >> 11) * (1.0 / 4503599627370496.0);
+        const double x = u * T.x[i];
+        if (std::abs(x) < T.x[i + 1]) return x;                       // camino rápido
+        if (i == 0) {                                                  // cola: algoritmo de Marsaglia
+            for (;;) {
+                const double x1 = -std::log(g.uniform_open()) / ZigTables::R;
+                const double y = -std::log(g.uniform_open());
+                if (y + y >= x1 * x1) return u < 0.0 ? -(ZigTables::R + x1) : ZigTables::R + x1;
+            }
+        }
+        // cuña: aceptación por comparación con la densidad
+        if (T.f[i + 1] + (T.f[i] - T.f[i + 1]) * g.uniform() < std::exp(-0.5 * x * x)) return x;
+    }
+}
+
+} // namespace
+
 void fill_normals(NormalMethod method, Xoshiro256pp& g, double* z, int n) {
     switch (method) {
     case NormalMethod::BoxMuller: {
@@ -90,6 +141,11 @@ void fill_normals(NormalMethod method, Xoshiro256pp& g, double* z, int n) {
     case NormalMethod::InverseCdf:
         for (int i = 0; i < n; i++) z[i] = norm_inv_cdf(g.uniform_open());
         break;
+    case NormalMethod::Ziggurat: {
+        const ZigTables& T = zig_tables();
+        for (int i = 0; i < n; i++) z[i] = zig_normal(g, T);
+        break;
+    }
     }
 }
 
