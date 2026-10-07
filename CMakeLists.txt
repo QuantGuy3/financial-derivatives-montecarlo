@@ -65,6 +65,29 @@ target_include_directories(mc_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(mc_core PUBLIC Threads::Threads PRIVATE mc_warnings)
 
 # ---------------------------------------------------------------------------
+# Motor CPU multihilo (sin dependencias externas).
+# -ffp-contract=off y sin fast-math: el contrato de determinismo (mismo binario => mismos
+# bits con cualquier nº de hilos) no admite FMA contraidos de forma distinta por función.
+# -march=native es opt-in (MC_ARCH=native): binarios portables por defecto.
+# ---------------------------------------------------------------------------
+add_library(mc_cpu STATIC
+    cpu/thread_pool.cpp
+    cpu/normal.cpp
+    cpu/sobol.cpp
+    cpu/joe_kuo_data.cpp
+)
+target_include_directories(mc_cpu PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(mc_cpu PUBLIC mc_core PRIVATE mc_warnings)
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(mc_cpu PRIVATE -ffp-contract=off)
+    if(MC_ARCH STREQUAL "native")
+        target_compile_options(mc_cpu PUBLIC -march=native)
+    endif()
+elseif(MSVC)
+    target_compile_options(mc_cpu PRIVATE /fp:precise)
+endif()
+
+# ---------------------------------------------------------------------------
 # Backend CUDA (solo si hay nvcc)
 # ---------------------------------------------------------------------------
 if(MC_HAS_CUDA)
