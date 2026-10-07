@@ -35,6 +35,11 @@ bool is_pow2(int n) { return n > 0 && (n & (n - 1)) == 0; }
 
 MCResult run_qmc(const ModelVariant& model, const PayoffVariant& payoff,
                  double eps, int n_steps, const QMCConfig& cfg, NoiseMode mode, const CpuOptions& opt) {
+    return run_qmc_eval(model, payoff, EvalSpec{}, eps, n_steps, cfg, mode, opt);
+}
+
+MCResult run_qmc_eval(const ModelVariant& model, const PayoffVariant& payoff, const EvalSpec& eval,
+                      double eps, int n_steps, const QMCConfig& cfg, NoiseMode mode, const CpuOptions& opt) {
     const auto t0 = Clock::now();
     if (opt.threads > 0) set_num_threads(opt.threads);
     ThreadPool& pool = global_pool();
@@ -72,7 +77,7 @@ MCResult run_qmc(const ModelVariant& model, const PayoffVariant& payoff,
         const NoiseSource* src = base[r].get();
         if (bb) { wrapped[r] = std::make_unique<BrownianBridgeNoise>(*base[r], *bb); src = wrapped[r].get(); }
         else if (pca) { wrapped[r] = std::make_unique<PcaNoise>(*base[r], *pca); src = wrapped[r].get(); }
-        sims[r] = std::make_unique<PathSim>(m, p, n_steps, *src);
+        sims[r] = std::make_unique<PathSim>(m, p, n_steps, *src, eval);
     }
 
     // ---- bucle de duplicaciones -----------------------------------------------------------

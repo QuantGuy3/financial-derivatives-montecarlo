@@ -13,6 +13,7 @@ add_executable(mc_tests
     test_mc_cpu.cpp
     test_qmc_cpu.cpp
     test_mlmc_cpu.cpp
+    test_vr_cpu.cpp
 )
 target_include_directories(mc_tests PRIVATE ${PROJECT_SOURCE_DIR}/third_party/doctest)
 target_compile_definitions(mc_tests PRIVATE MC_TEST_DIR="${CMAKE_CURRENT_SOURCE_DIR}")

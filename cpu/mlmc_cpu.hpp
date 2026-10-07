@@ -23,4 +23,11 @@ MCResult run_mlqmc(const ModelVariant& model, const PayoffVariant& payoff,
                    double eps, const MLMCConfig& ml_cfg = {}, const QMCConfig& qmc_cfg = {},
                    NoiseMode mode = NoiseMode::Raw, const CpuOptions& opt = {});
 
+// Variantes con reducción de varianza (CV: GBM+Asian; IS: GBM+call europea).
+MCResult run_mlmc_eval(const ModelVariant& model, const PayoffVariant& payoff, const EvalSpec& eval,
+                       double eps, const MLMCConfig& cfg = {}, const CpuOptions& opt = {});
+MCResult run_mlqmc_eval(const ModelVariant& model, const PayoffVariant& payoff, const EvalSpec& eval,
+                        double eps, const MLMCConfig& ml_cfg = {}, const QMCConfig& qmc_cfg = {},
+                        NoiseMode mode = NoiseMode::Raw, const CpuOptions& opt = {});
+
 } // namespace mc::cpu

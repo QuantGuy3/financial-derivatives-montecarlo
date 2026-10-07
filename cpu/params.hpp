@@ -51,6 +51,18 @@ struct CpuPayoff {
     int    n_assets = 1;
 };
 
+// Qué se evalúa sobre cada camino. Plain = el payoff del modelo; CV* = payoff principal con
+// variable de control (Y_cv = Y_main - beta·(Y_ctrl - E_ctrl)), solo las dos parejas que
+// implementa la GPU; IsGbmCall = importance sampling de la call europea bajo GBM
+// (desplazamiento z_step en cada incremento, con cociente de verosimilitud).
+struct EvalSpec {
+    enum class Kind { Plain, CvAsianGeom, CvDupireGbm, IsGbmCall };
+    Kind   kind = Kind::Plain;
+    double beta = 0.0;      // CV
+    double E_ctrl = 0.0;    // CV: valor esperado analítico del control
+    double z_star = 0.0;    // IS: desplazamiento total; por paso es z_star/sqrt(n_pasos)
+};
+
 CpuModel  make_cpu_model(const ModelVariant& mv);
 CpuPayoff make_cpu_payoff(const PayoffVariant& pv);
 

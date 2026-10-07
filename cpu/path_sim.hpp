@@ -20,7 +20,8 @@ namespace mc::cpu {
 
 // Resultado de un chunk
 struct ChunkAcc {
-    ShiftedAcc acc;
+    ShiftedAcc acc;            // estadístico principal (payoff, o payoff con CV/IS aplicado)
+    ShiftedAcc2 pair;          // CV: (Y_principal, Y_control) para estimar beta en el piloto
     long long nonfinite = 0;   // caminos con payoff no finito (se excluyen de la muestra)
 };
 
@@ -45,7 +46,8 @@ std::vector<long long> make_wave_ends(long long n_chunks);
 class PathSim {
 public:
     // noise.dim() debe ser n_steps * model.noise_dim. Las referencias deben sobrevivir al objeto.
-    PathSim(const CpuModel& m, const CpuPayoff& p, int n_steps, const NoiseSource& noise);
+    PathSim(const CpuModel& m, const CpuPayoff& p, int n_steps, const NoiseSource& noise,
+            const EvalSpec& eval = {});
 
     int n_steps() const { return kc_.n_steps; }
     int chunk_paths() const { return chunk_paths_; }
@@ -59,6 +61,8 @@ private:
     const NoiseSource& noise_;
     KCtx kc_;
     SingleFn fn_ = nullptr;
+    EvalFn eval_fn_ = nullptr;     // CV / IS (nullptr = payoff simple)
+    EvalSpec eval_;
     bool multi_ = false;
     int chunk_paths_ = 64;
 };
@@ -66,6 +70,7 @@ private:
 // Resultado de simular un rango de caminos
 struct RangeResult {
     Moments moments;
+    Cov2 pair;                 // CV: covarianza (Y_principal, Y_control) de los caminos finitos
     long long nonfinite = 0;
     bool stopped = false;      // parada anticipada (cancelación o tiempo máximo)
 };
@@ -86,7 +91,8 @@ struct ChunkAcc2 {
 class CoupledSim {
 public:
     // noise.dim() debe ser n_fine * model.noise_dim y entregar el incremento FINO ya escalado.
-    CoupledSim(const CpuModel& m, const CpuPayoff& p, int level, int M, const NoiseSource& noise);
+    CoupledSim(const CpuModel& m, const CpuPayoff& p, int level, int M, const NoiseSource& noise,
+               const EvalSpec& eval = {});
 
     int n_fine() const { return kc_.n_fine; }
     int chunk_paths() const { return chunk_paths_; }

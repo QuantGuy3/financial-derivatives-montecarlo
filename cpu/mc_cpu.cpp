@@ -43,6 +43,11 @@ std::pair<double, double> run_mc_fixed(const ModelVariant& model, const PayoffVa
 
 MCResult run_mc(const ModelVariant& model, const PayoffVariant& payoff,
                 double eps, int n_steps, const MCConfig& cfg, const CpuOptions& opt) {
+    return run_mc_eval(model, payoff, EvalSpec{}, eps, n_steps, cfg, opt);
+}
+
+MCResult run_mc_eval(const ModelVariant& model, const PayoffVariant& payoff, const EvalSpec& eval,
+                     double eps, int n_steps, const MCConfig& cfg, const CpuOptions& opt) {
     const auto t0 = Clock::now();
     ThreadPool& pool = pool_for(opt);
     const CpuModel m = make_cpu_model(model);
@@ -71,7 +76,7 @@ MCResult run_mc(const ModelVariant& model, const PayoffVariant& payoff,
 
     // ---- piloto: estima la varianza de la muestra ------------------------------------------
     RngNoise pilot_noise(cfg.seed, Stream::Pilot, 0, D, sqrt_h, opt.normal);
-    PathSim pilot_sim(m, p, n_steps, pilot_noise);
+    PathSim pilot_sim(m, p, n_steps, pilot_noise, eval);
     RangeResult pr = simulate_range(pool, pilot_sim, 0, cfg.pilot_n, nullptr);
     info.n_nonfinite += pr.nonfinite;
     const double sample_var = pr.moments.variance_biased();
@@ -82,7 +87,7 @@ MCResult run_mc(const ModelVariant& model, const PayoffVariant& payoff,
 
     // ---- corrida principal --------------------------------------------------------------------
     RngNoise noise(cfg.seed, Stream::Main, 0, D, sqrt_h, opt.normal);
-    PathSim sim(m, p, n_steps, noise);
+    PathSim sim(m, p, n_steps, noise, eval);
     RangeResult mr = simulate_range(pool, sim, 0, N_needed,
         [&](const Moments& mo, long long n_done) {
             emit(Stage::Main, n_done, mo, false);

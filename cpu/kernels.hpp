@@ -30,14 +30,19 @@ struct KCtx {
     double h = 1.0;
     double sqrt_h = 1.0;
     double em = 1.0;       // exp(-kappa*h) (Heston)
+    // Evaluadores con reducción de varianza (ver EvalSpec)
+    double beta = 0.0, E_ctrl = 0.0;
+    double z_step = 0.0;   // IS: desplazamiento por paso = z_star / sqrt(n_steps)
 };
 
-inline KCtx make_kctx(const CpuModel& m, const CpuPayoff& p, int n_steps) {
+inline KCtx make_kctx(const CpuModel& m, const CpuPayoff& p, int n_steps, const EvalSpec& ev = {}) {
     KCtx c;
     c.m = &m; c.p = &p; c.n_steps = n_steps;
     c.h = m.T / n_steps;
     c.sqrt_h = std::sqrt(c.h);
     c.em = std::exp(-m.kappa * c.h);
+    c.beta = ev.beta; c.E_ctrl = ev.E_ctrl;
+    c.z_step = ev.z_star / std::sqrt((double)n_steps);
     return c;
 }
 
@@ -163,9 +168,12 @@ struct CKCtx {
     int    n_fine = 1, n_coarse = 0, M = 2;
     double h_f = 1.0, h_c = 1.0;
     double em_f = 1.0, em_c = 1.0;   // exp(-kappa h) fino/grueso (Heston)
+    double beta = 0.0, E_ctrl = 0.0; // CV
+    double z_level = 0.0;            // IS: z_star / sqrt(n_fine)
 };
 
-inline CKCtx make_ckctx(const CpuModel& m, const CpuPayoff& p, int level, int M) {
+inline CKCtx make_ckctx(const CpuModel& m, const CpuPayoff& p, int level, int M,
+                        const EvalSpec& ev = {}) {
     CKCtx c;
     c.m = &m; c.p = &p; c.M = M;
     c.n_fine = 1;
@@ -175,6 +183,8 @@ inline CKCtx make_ckctx(const CpuModel& m, const CpuPayoff& p, int level, int M)
     c.h_c = m.T / std::max(c.n_coarse, 1);
     c.em_f = std::exp(-m.kappa * c.h_f);
     c.em_c = std::exp(-m.kappa * c.h_c);
+    c.beta = ev.beta; c.E_ctrl = ev.E_ctrl;
+    c.z_level = ev.z_star / std::sqrt((double)c.n_fine);
     return c;
 }
 
@@ -264,5 +274,14 @@ void kernel_coupled(const CKCtx& c, const double* dW, int ld, double* Yf, double
 
 using CoupledFn = void (*)(const CKCtx&, const double*, int, double*, double*);
 CoupledFn select_coupled_kernel(ModelKind mk, PayoffKind pk);
+
+// ---- evaluadores con variable de control / importance sampling (un nivel) -----------------------
+// Y0, Y1: valores por carril. CV: (Y_principal, Y_control); IS: Y0 = payoff·LR (Y1 no se usa).
+using EvalFn = void (*)(const KCtx&, const double*, int, double*, double*);
+// Devuelve nullptr para EvalSpec::Kind::Plain.
+EvalFn select_eval_kernel(EvalSpec::Kind kind);
+
+// Versiones acopladas fino/grueso para MLMC (Yf, Yc ya con CV/IS aplicados; Yc = 0 en el nivel 0).
+CoupledFn select_coupled_eval_kernel(EvalSpec::Kind kind);
 
 } // namespace mc::cpu

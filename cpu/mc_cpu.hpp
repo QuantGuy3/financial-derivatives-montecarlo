@@ -6,6 +6,7 @@
 #include "../models.hpp"
 #include "../payoffs.hpp"
 #include "normal.hpp"
+#include "params.hpp"
 
 #include <vector>
 
@@ -33,6 +34,10 @@ struct CpuOptions {
 MCResult run_mc(const ModelVariant& model, const PayoffVariant& payoff,
                 double eps, int n_steps, const MCConfig& cfg = {},
                 const CpuOptions& opt = {});
+
+// Igual que run_mc pero evaluando `eval` (CV / IS) sobre cada camino en vez del payoff simple.
+MCResult run_mc_eval(const ModelVariant& model, const PayoffVariant& payoff, const EvalSpec& eval,
+                     double eps, int n_steps, const MCConfig& cfg = {}, const CpuOptions& opt = {});
 
 // N caminos con n_steps pasos, sin varianza adaptativa. Devuelve {media, var_de_la_media}
 // con var = max(0, E[Y²] - media²)/N (igual que run_mc_fixed de la GPU).

@@ -49,8 +49,9 @@ int pow_int(int M, int l) {
 
 class MlmcEngine final : public LevelEngine {
 public:
-    MlmcEngine(const CpuModel& m, const CpuPayoff& p, const MLMCConfig& cfg, NormalMethod normal)
-        : m_(m), p_(p), cfg_(cfg), normal_(normal), lev_((size_t)cfg.max_L + 1) {}
+    MlmcEngine(const CpuModel& m, const CpuPayoff& p, const MLMCConfig& cfg, NormalMethod normal,
+               const EvalSpec& eval)
+        : m_(m), p_(p), cfg_(cfg), normal_(normal), eval_(eval), lev_((size_t)cfg.max_L + 1) {}
 
     int replicas() const override { return 1; }
 
@@ -80,7 +81,7 @@ private:
             const double sqrt_hf = std::sqrt(m_.T / n_fine);
             L.noise = std::make_unique<RngNoise>(cfg_.seed, Stream::Main, (uint64_t)l,
                                                  n_fine * m_.noise_dim, sqrt_hf, normal_);
-            L.sim = std::make_unique<CoupledSim>(m_, p_, l, cfg_.M, *L.noise);
+            L.sim = std::make_unique<CoupledSim>(m_, p_, l, cfg_.M, *L.noise, eval_);
         }
         return L;
     }
@@ -89,14 +90,15 @@ private:
     const CpuPayoff& p_;
     MLMCConfig cfg_;
     NormalMethod normal_;
+    EvalSpec eval_;
     std::vector<Level> lev_;
 };
 
 class MlqmcEngine final : public LevelEngine {
 public:
     MlqmcEngine(const CpuModel& m, const CpuPayoff& p, const MLMCConfig& ml, const QMCConfig& q,
-                NoiseMode mode, NormalMethod normal, ThreadPool& pool)
-        : m_(m), p_(p), ml_(ml), q_(q), mode_(mode), normal_(normal), pool_(pool),
+                NoiseMode mode, NormalMethod normal, ThreadPool& pool, const EvalSpec& eval)
+        : m_(m), p_(p), ml_(ml), q_(q), mode_(mode), normal_(normal), pool_(pool), eval_(eval),
           lev_((size_t)ml.max_L + 1) {}
 
     int replicas() const override { return q_.R; }
@@ -161,7 +163,7 @@ private:
             const NoiseSource* src = L.base[(size_t)r].get();
             if (bb) { L.wrapped[(size_t)r] = std::make_unique<BrownianBridgeNoise>(*L.base[(size_t)r], *bb); src = L.wrapped[(size_t)r].get(); }
             else if (pca) { L.wrapped[(size_t)r] = std::make_unique<PcaNoise>(*L.base[(size_t)r], *pca); src = L.wrapped[(size_t)r].get(); }
-            L.sims[(size_t)r] = std::make_unique<CoupledSim>(m_, p_, l, ml_.M, *src);
+            L.sims[(size_t)r] = std::make_unique<CoupledSim>(m_, p_, l, ml_.M, *src, eval_);
         }
         L.built = true;
         return L;
@@ -174,6 +176,7 @@ private:
     NoiseMode mode_;
     NormalMethod normal_;
     ThreadPool& pool_;
+    EvalSpec eval_;
     std::vector<Level> lev_;
 };
 
@@ -338,6 +341,11 @@ void check_ml(const CpuModel& m, double eps, const MLMCConfig& cfg) {
 
 MCResult run_mlmc(const ModelVariant& model, const PayoffVariant& payoff,
                   double eps, const MLMCConfig& cfg, const CpuOptions& opt) {
+    return run_mlmc_eval(model, payoff, EvalSpec{}, eps, cfg, opt);
+}
+
+MCResult run_mlmc_eval(const ModelVariant& model, const PayoffVariant& payoff, const EvalSpec& eval,
+                       double eps, const MLMCConfig& cfg, const CpuOptions& opt) {
     const auto t0 = Clock::now();
     if (opt.threads > 0) set_num_threads(opt.threads);
     ThreadPool& pool = global_pool();
@@ -346,7 +354,7 @@ MCResult run_mlmc(const ModelVariant& model, const PayoffVariant& payoff,
     check_ml(m, eps, cfg);
 
     RunInfo info; info.threads = pool.threads();
-    MlmcEngine eng(m, p, cfg, opt.normal);
+    MlmcEngine eng(m, p, cfg, opt.normal, eval);
     MCResult r = giles(eng, cfg, eps, opt, pool, t0, info);
     if (opt.info) *opt.info = std::move(info);
     return r;
@@ -355,6 +363,12 @@ MCResult run_mlmc(const ModelVariant& model, const PayoffVariant& payoff,
 MCResult run_mlqmc(const ModelVariant& model, const PayoffVariant& payoff,
                    double eps, const MLMCConfig& ml_cfg, const QMCConfig& qmc_cfg,
                    NoiseMode mode, const CpuOptions& opt) {
+    return run_mlqmc_eval(model, payoff, EvalSpec{}, eps, ml_cfg, qmc_cfg, mode, opt);
+}
+
+MCResult run_mlqmc_eval(const ModelVariant& model, const PayoffVariant& payoff, const EvalSpec& eval,
+                        double eps, const MLMCConfig& ml_cfg, const QMCConfig& qmc_cfg,
+                        NoiseMode mode, const CpuOptions& opt) {
     const auto t0 = Clock::now();
     if (opt.threads > 0) set_num_threads(opt.threads);
     ThreadPool& pool = global_pool();
@@ -366,7 +380,7 @@ MCResult run_mlqmc(const ModelVariant& model, const PayoffVariant& payoff,
         throw std::invalid_argument("run_mlqmc: Brownian Bridge/PCA solo soportados para ruido de dimensión 1 (no Heston)");
 
     RunInfo info; info.threads = pool.threads();
-    MlqmcEngine eng(m, p, ml_cfg, qmc_cfg, mode, opt.normal, pool);
+    MlqmcEngine eng(m, p, ml_cfg, qmc_cfg, mode, opt.normal, pool, eval);
     MCResult r = giles(eng, ml_cfg, eps, opt, pool, t0, info);
     if (opt.info) *opt.info = std::move(info);
     return r;
