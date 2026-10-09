@@ -71,6 +71,9 @@ target_link_libraries(mc_core PUBLIC Threads::Threads PRIVATE mc_warnings)
 # Motor CPU multihilo (sin dependencias externas).
 # -ffp-contract=off y sin fast-math: el contrato de determinismo (mismo binario => mismos
 # bits con cualquier nº de hilos) no admite FMA contraidos de forma distinta por función.
+# La opción es PUBLIC: buena parte del motor son funciones inline de cabecera (núcleos, fast_pow),
+# y con -march=native un fichero de otro destino las compilaría con FMA; el enlazador se queda con
+# una sola copia de cada función inline, así que todas deben compilarse igual.
 # -march=native es opt-in (MC_ARCH=native): binarios portables por defecto.
 # ---------------------------------------------------------------------------
 add_library(mc_cpu STATIC
@@ -95,7 +98,7 @@ target_include_directories(mc_cpu PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(mc_cpu PUBLIC MC_LANES=${MC_LANES})
 target_link_libraries(mc_cpu PUBLIC mc_core PRIVATE mc_warnings)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    target_compile_options(mc_cpu PRIVATE -ffp-contract=off)
+    target_compile_options(mc_cpu PUBLIC $<$<COMPILE_LANGUAGE:CXX>:-ffp-contract=off>)
     if(MC_ARCH STREQUAL "native")
         target_compile_options(mc_cpu PUBLIC -march=native)
     endif()
