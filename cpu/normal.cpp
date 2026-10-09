@@ -1,7 +1,26 @@
 #include "normal.hpp"
 
+#include <algorithm>
+#include <atomic>
+#include <bit>
 #include <limits>
 #include <numbers>
+#include <vector>
+
+#if defined(__x86_64__) || defined(_M_X64)
+#define MC_X86_64 1
+#include <immintrin.h>
+#if defined(_MSC_VER) && !defined(__clang__)
+#include <intrin.h>
+#endif
+#endif
+
+// Función compilada para AVX2 aunque el resto del fichero no lo esté (se elige en tiempo de ejecución).
+#if defined(__GNUC__) || defined(__clang__)
+#define MC_TARGET_AVX2 __attribute__((target("avx2")))
+#else
+#define MC_TARGET_AVX2
+#endif
 
 namespace mc::cpu {
 
@@ -67,8 +86,9 @@ double norm_inv_cdf(double p) {
     return (q < 0.0) ? -val : val;
 }
 
-// ---- Ziggurat (Marsaglia & Tsang 2000, 256 capas) ------------------------------------------------------------
+// ---- Ziggurat secuencial (Marsaglia & Tsang 2000, 256 capas) ---------------------------------------------------
 //
+// Variante de un solo generador que usa fill_normals. El motor usa la versión por bloque de más abajo.
 // El 98.8 % de las veces basta una multiplicación y una comparación; solo se evalúa exp en la cuña
 // (~1.2 %) y log en la cola (~0.03 %). Constantes de la tabla de 256 capas:
 //   R = 3.6541528853610088 (abscisa de la última capa), V = 0.00492867323399 (área de cada capa).
@@ -96,14 +116,14 @@ const ZigTables& zig_tables() {
     return t;
 }
 
-inline double zig_normal(Xoshiro256pp& g, const ZigTables& T) {
+// Camino lento del Ziggurat (cuña y cola, ~1.2 % de las normales), fuera de línea para que el
+// bucle rápido quede compacto. Recibe la capa i, el uniforme u y x = u*x[i] del intento que NO pasó
+// la prueba rápida, y sigue consumiendo g hasta aceptar.
+#if defined(__GNUC__)
+__attribute__((noinline))
+#endif
+double zig_slow(Xoshiro256pp& g, const ZigTables& T, int i, double u, double x) {
     for (;;) {
-        const uint64_t bits = g.next();
-        const int i = (int)(bits & 0xFF);
-        // 53 bits con signo -> u en [-1, 1)
-        const double u = (double)((int64_t)bits >> 11) * (1.0 / 4503599627370496.0);
-        const double x = u * T.x[i];
-        if (std::abs(x) < T.x[i + 1]) return x;                       // camino rápido
         if (i == 0) {                                                  // cola: algoritmo de Marsaglia
             for (;;) {
                 const double x1 = -std::log(g.uniform_open()) / ZigTables::R;
@@ -113,10 +133,245 @@ inline double zig_normal(Xoshiro256pp& g, const ZigTables& T) {
         }
         // cuña: aceptación por comparación con la densidad
         if (T.f[i + 1] + (T.f[i] - T.f[i + 1]) * g.uniform() < std::exp(-0.5 * x * x)) return x;
+        // rechazo: intento nuevo completo
+        const uint64_t bits = g.next();
+        i = (int)(bits & 0xFF);
+        u = (double)((int64_t)bits >> 11) * (1.0 / 4503599627370496.0);
+        x = u * T.x[i];
+        if (std::abs(x) < T.x[i + 1]) return x;
     }
 }
 
+inline double zig_normal(Xoshiro256pp& g, const ZigTables& T) {
+    const uint64_t bits = g.next();
+    const int i = (int)(bits & 0xFF);
+    // 53 bits con signo -> u en [-1, 1)
+    const double u = (double)((int64_t)bits >> 11) * (1.0 / 4503599627370496.0);
+    const double x = u * T.x[i];
+    if (std::abs(x) < T.x[i + 1]) return x;                           // camino rápido
+    return zig_slow(g, T, i, u, x);
+}
+
+// ---- Ziggurat por bloque -------------------------------------------------------------------------------------
+//
+// Es el generador que usa el motor (RngNoise). Definición, por carril (= camino) y dimensión d:
+//
+//   bits = palabra nº d del xoshiro256++ del camino           (siempre UNA palabra por normal)
+//   i = bits & (N-1)                                           capa (N capas)
+//   u = double(1.m) - 1.5, con m = bits 12..63                 uniforme en [-0.5, 0.5), 52 bits
+//   x = u · (2·x[i])
+//   si |x| < x[i+1]:  z = x                                    (>= 98.5 % de las veces)
+//   si no:            z = zig_slow_aux(clave del camino, d, bits)
+//
+// Diferencias con el Ziggurat secuencial clásico (zig_normal, arriba), pensadas para vectorizar:
+//   * La cuña y la cola no siguen consumiendo el generador principal: sus sorteos extra salen de un
+//     SplitMix64 auxiliar sembrado con (clave del camino, d). Así el generador principal avanza
+//     exactamente una palabra por normal y el bucle vectorial nunca se detiene: las excepciones se
+//     apuntan en una lista (sin saltos) y se corrigen después con código escalar.
+//   * El uniforme se forma poniendo 52 bits como mantisa de un double en [1, 2) y restando 1.5: son
+//     tres operaciones vectoriales exactas, sin conversión entero -> double (que AVX2 no tiene).
+//
+// Dos implementaciones que dan los MISMOS bits (lo comprueba test_rng_normal): la escalar (referencia,
+// única disponible fuera de x86-64) y la AVX2, de 4 carriles por vector, elegida en tiempo de ejecución.
+// Una variante SSE2 de 2 carriles se midió y se descartó: no gana a la escalar (docs/perf).
+
+#ifndef MC_ZIG_LAYERS
+#define MC_ZIG_LAYERS 512
+#endif
+
+struct ZigBlock {
+    static constexpr int N = MC_ZIG_LAYERS;
+    // R = abscisa de la última capa, V = área de cada capa (densidad sin normalizar exp(-x²/2)).
+    // Calculadas con 40 dígitos resolviendo la ecuación de cierre de la construcción.
+#if MC_ZIG_LAYERS == 256
+    static constexpr double R = 3.6541528853610088, V = 4.9286732339746553e-3;
+#elif MC_ZIG_LAYERS == 512
+    static constexpr double R = 3.8520461503683912, V = 2.4567663515413557e-3;
+#elif MC_ZIG_LAYERS == 1024
+    static constexpr double R = 4.0388498461095045, V = 1.2263246463530881e-3;
+#else
+#error "MC_ZIG_LAYERS debe ser 256, 512 o 1024"
+#endif
+    alignas(64) double pair[N][2];   // {2·x[i], x[i+1]}: una sola búsqueda por normal
+    double f[N + 1];                 // exp(-x[i]²/2)
+
+    ZigBlock() {
+        auto pdf = [](double v) { return std::exp(-0.5 * v * v); };
+        std::vector<double> x((size_t)N + 1);
+        x[0] = V / pdf(R);
+        x[1] = R;
+        for (int i = 2; i < N; i++) x[(size_t)i] = std::sqrt(-2.0 * std::log(V / x[(size_t)i - 1] + pdf(x[(size_t)i - 1])));
+        x[(size_t)N] = 0.0;
+        for (int i = 0; i <= N; i++) f[i] = pdf(x[(size_t)i]);
+        for (int i = 0; i < N; i++) {
+            pair[i][0] = 2.0 * x[(size_t)i];
+            pair[i][1] = x[(size_t)i + 1];
+        }
+    }
+};
+
+const ZigBlock& zig_block() {
+    static const ZigBlock t;
+    return t;
+}
+
+inline double zig_u(uint64_t bits) {
+    return std::bit_cast<double>((bits >> 12) | 0x3FF0000000000000ULL) - 1.5;
+}
+
+// Cuña y cola con el generador auxiliar. `d` es el índice absoluto de la normal dentro del camino.
+#if defined(__GNUC__)
+__attribute__((noinline))
+#endif
+double zig_slow_aux(uint64_t key, uint64_t d, uint64_t bits, const ZigBlock& T) {
+    uint64_t sm = key ^ (0x9FB21C651E98DF25ULL * (d + 1));
+    for (;;) {
+        const int i = (int)(bits & (uint64_t)(ZigBlock::N - 1));
+        const double u = zig_u(bits);
+        const double x = u * T.pair[i][0];
+        if (std::abs(x) < T.pair[i][1]) return x;                      // solo en reintentos
+        if (i == 0) {                                                  // cola: algoritmo de Marsaglia
+            for (;;) {
+                const double x1 = -std::log(Xoshiro256pp::to_uniform_open(splitmix64_next(sm))) / ZigBlock::R;
+                const double y = -std::log(Xoshiro256pp::to_uniform_open(splitmix64_next(sm)));
+                if (y + y >= x1 * x1) return u < 0.0 ? -(ZigBlock::R + x1) : ZigBlock::R + x1;
+            }
+        }
+        // cuña: aceptación por comparación con la densidad
+        const double uy = Xoshiro256pp::to_uniform(splitmix64_next(sm));
+        if (T.f[i + 1] + (T.f[i] - T.f[i + 1]) * uy < std::exp(-0.5 * x * x)) return x;
+        bits = splitmix64_next(sm);                                    // rechazo: intento nuevo completo
+    }
+}
+
+void zig_fill_scalar(LaneRng& g, int l0, int l1, double* Z, int ld, int D, double scale, const ZigBlock& T) {
+    for (int l = l0; l < l1; l++) {
+        Xoshiro256pp gl = g.get(l);
+        const uint64_t key = g.key[l];
+        double* out = Z + l;
+        for (int d = 0; d < D; d++, out += ld) {
+            const uint64_t bits = gl.next();
+            const int i = (int)(bits & (uint64_t)(ZigBlock::N - 1));
+            const double x = zig_u(bits) * T.pair[i][0];
+            if (std::abs(x) < T.pair[i][1]) *out = x * scale;
+            else *out = zig_slow_aux(key, g.pos + (uint64_t)d, bits, T) * scale;
+        }
+        g.set(l, gl);
+    }
+}
+
+#ifdef MC_X86_64
+
+constexpr int kZigChunk = 64;   // normales por carril entre dos pasadas de corrección de excepciones
+
+// Carriles l0 .. l0+3.
+MC_TARGET_AVX2 void zig_fill_avx2(LaneRng& g, int l0, double* Z, int ld, int D, double scale, const ZigBlock& T) {
+    __m256i s0 = _mm256_loadu_si256((const __m256i*)&g.s0[l0]);
+    __m256i s1 = _mm256_loadu_si256((const __m256i*)&g.s1[l0]);
+    __m256i s2 = _mm256_loadu_si256((const __m256i*)&g.s2[l0]);
+    __m256i s3 = _mm256_loadu_si256((const __m256i*)&g.s3[l0]);
+    const __m256i one_bits = _mm256_set1_epi64x(0x3FF0000000000000LL);
+    const __m256d c15 = _mm256_set1_pd(1.5);
+    const __m256d absmask = _mm256_castsi256_pd(_mm256_set1_epi64x(0x7FFFFFFFFFFFFFFFLL));
+    const __m256d vscale = _mm256_set1_pd(scale);
+    constexpr uint64_t imask = (uint64_t)(ZigBlock::N - 1);
+    alignas(32) uint64_t ebits[kZigChunk][4];   // palabras de las vueltas con algún carril rechazado
+    alignas(32) uint64_t rb[4];                 // palabra de la vuelta actual (para sacar los índices)
+    int ewho[kZigChunk];
+    for (int d0 = 0; d0 < D; d0 += kZigChunk) {
+        const int nd = std::min(kZigChunk, D - d0);
+        double* row = Z + (size_t)d0 * ld + l0;
+        int cnt = 0;
+        for (int j = 0; j < nd; j++, row += ld) {
+            // xoshiro256++
+            const __m256i sum = _mm256_add_epi64(s0, s3);
+            const __m256i r = _mm256_add_epi64(_mm256_or_si256(_mm256_slli_epi64(sum, 23), _mm256_srli_epi64(sum, 41)), s0);
+            const __m256i t = _mm256_slli_epi64(s1, 17);
+            s2 = _mm256_xor_si256(s2, s0);
+            s3 = _mm256_xor_si256(s3, s1);
+            s1 = _mm256_xor_si256(s1, s2);
+            s0 = _mm256_xor_si256(s0, s3);
+            s2 = _mm256_xor_si256(s2, t);
+            s3 = _mm256_or_si256(_mm256_slli_epi64(s3, 45), _mm256_srli_epi64(s3, 19));
+            // u en [-0.5, 0.5)
+            const __m256d u = _mm256_sub_pd(_mm256_castsi256_pd(_mm256_or_si256(_mm256_srli_epi64(r, 12), one_bits)), c15);
+            // tabla: {2·x[i], x[i+1]} de cada carril. Los índices salen de una copia en memoria (más
+            // barato que extraerlos del registro). La lista de excepciones recibe otra copia: se
+            // escribe siempre y el contador solo avanza si algún carril falla, así no hay salto.
+            // (Son dos copias a propósito: leer los índices de ebits[cnt] haría depender la búsqueda
+            // del contador y encadenaría todas las vueltas.)
+            _mm256_store_si256((__m256i*)rb, r);
+            _mm256_store_si256((__m256i*)ebits[cnt], r);
+            const __m256d a = _mm256_insertf128_pd(_mm256_castpd128_pd256(_mm_load_pd(T.pair[rb[0] & imask])),
+                                                   _mm_load_pd(T.pair[rb[2] & imask]), 1);
+            const __m256d b = _mm256_insertf128_pd(_mm256_castpd128_pd256(_mm_load_pd(T.pair[rb[1] & imask])),
+                                                   _mm_load_pd(T.pair[rb[3] & imask]), 1);
+            const __m256d x = _mm256_mul_pd(u, _mm256_unpacklo_pd(a, b));
+            const int ok = _mm256_movemask_pd(_mm256_cmp_pd(_mm256_and_pd(x, absmask), _mm256_unpackhi_pd(a, b), _CMP_LT_OQ));
+            _mm256_storeu_pd(row, _mm256_mul_pd(x, vscale));
+            ewho[cnt] = (j << 4) | (ok ^ 15);
+            cnt += (ok != 15);
+        }
+        for (int e = 0; e < cnt; e++) {
+            const int j = ewho[e] >> 4;
+            for (int k = 0; k < 4; k++)
+                if ((ewho[e] >> k) & 1)
+                    Z[(size_t)(d0 + j) * ld + l0 + k] =
+                        zig_slow_aux(g.key[l0 + k], g.pos + (uint64_t)(d0 + j), ebits[e][k], T) * scale;
+        }
+    }
+    _mm256_storeu_si256((__m256i*)&g.s0[l0], s0);
+    _mm256_storeu_si256((__m256i*)&g.s1[l0], s1);
+    _mm256_storeu_si256((__m256i*)&g.s2[l0], s2);
+    _mm256_storeu_si256((__m256i*)&g.s3[l0], s3);
+    _mm256_zeroupper();
+}
+
+bool detect_avx2() {
+#if defined(__GNUC__) || defined(__clang__)
+    return __builtin_cpu_supports("avx2");
+#elif defined(_MSC_VER)
+    int r[4];
+    __cpuid(r, 0);
+    if (r[0] < 7) return false;
+    __cpuid(r, 1);
+    const bool osxsave = (r[2] & (1 << 27)) != 0, avx = (r[2] & (1 << 28)) != 0;
+    if (!osxsave || !avx) return false;
+    if ((_xgetbv(0) & 6) != 6) return false;     // el sistema operativo guarda el estado YMM
+    __cpuidex(r, 7, 0);
+    return (r[1] & (1 << 5)) != 0;
+#else
+    return false;
+#endif
+}
+
+#endif // MC_X86_64
+
+std::atomic<int> g_simd_level{-1};   // -1 = sin inicializar
+
 } // namespace
+
+SimdLevel simd_level_available() {
+#ifdef MC_X86_64
+    static const SimdLevel best = detect_avx2() ? SimdLevel::Avx2 : SimdLevel::Scalar;
+    return best;
+#else
+    return SimdLevel::Scalar;
+#endif
+}
+
+SimdLevel simd_level() {
+    int v = g_simd_level.load(std::memory_order_relaxed);
+    if (v < 0) {
+        v = (int)simd_level_available();
+        g_simd_level.store(v, std::memory_order_relaxed);
+    }
+    return (SimdLevel)v;
+}
+
+void set_simd_level(SimdLevel level) {
+    g_simd_level.store(std::min((int)level, (int)simd_level_available()), std::memory_order_relaxed);
+}
 
 void fill_normals(NormalMethod method, Xoshiro256pp& g, double* z, int n) {
     switch (method) {
@@ -147,6 +402,57 @@ void fill_normals(NormalMethod method, Xoshiro256pp& g, double* z, int n) {
         break;
     }
     }
+}
+
+void fill_normals_lanes(NormalMethod method, LaneRng& g, int n, double* Z, int ld, int D, double scale) {
+    constexpr int W = kLanes;
+    uint64_t bits[W];
+    switch (method) {
+    case NormalMethod::Ziggurat: {
+        const ZigBlock& T = zig_block();
+        int l = 0;
+#ifdef MC_X86_64
+        if (simd_level() == SimdLevel::Avx2)
+            for (; l + 4 <= n; l += 4) zig_fill_avx2(g, l, Z, ld, D, scale, T);
+#endif
+        if (l < n) zig_fill_scalar(g, l, n, Z, ld, D, scale, T);
+        break;
+    }
+    case NormalMethod::BoxMuller: {
+        const double two_pi = 2.0 * std::numbers::pi;
+        uint64_t bits2[W];
+        int d = 0;
+        for (; d + 1 < D; d += 2) {
+            g.next_all(bits);
+            g.next_all(bits2);
+            double* row0 = Z + (size_t)d * ld;
+            double* row1 = row0 + ld;
+            for (int l = 0; l < n; l++) {
+                const double r = std::sqrt(-2.0 * std::log(Xoshiro256pp::to_uniform_open(bits[l])));
+                const double th = two_pi * Xoshiro256pp::to_uniform(bits2[l]);
+                row0[l] = (r * std::cos(th)) * scale;
+                row1[l] = (r * std::sin(th)) * scale;
+            }
+        }
+        if (d < D) {   // D impar: se descarta la segunda normal del último par
+            g.next_all(bits);
+            g.next_all(bits2);
+            double* row = Z + (size_t)d * ld;
+            for (int l = 0; l < n; l++)
+                row[l] = (std::sqrt(-2.0 * std::log(Xoshiro256pp::to_uniform_open(bits[l]))) *
+                          std::cos(two_pi * Xoshiro256pp::to_uniform(bits2[l]))) * scale;
+        }
+        break;
+    }
+    case NormalMethod::InverseCdf:
+        for (int d = 0; d < D; d++) {
+            g.next_all(bits);
+            double* row = Z + (size_t)d * ld;
+            for (int l = 0; l < n; l++) row[l] = norm_inv_cdf(Xoshiro256pp::to_uniform_open(bits[l])) * scale;
+        }
+        break;
+    }
+    g.pos += (uint64_t)D;
 }
 
 } // namespace mc::cpu

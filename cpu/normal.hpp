@@ -22,7 +22,26 @@ enum class NormalMethod {
     Ziggurat,     // Marsaglia-Tsang con 256 capas: ~1 palabra aleatoria por normal, sin funciones transcendentes
 };
 
-// Rellena z[0..n) con normales N(0,1) i.i.d. consumiendo el generador g.
+// Rellena z[0..n) con normales N(0,1) i.i.d. consumiendo el generador g, una detrás de otra.
+// Es el generador secuencial clásico; el motor NO lo usa (usa fill_normals_lanes).
 void fill_normals(NormalMethod method, Xoshiro256pp& g, double* z, int n);
+
+// Juego de instrucciones con el que se genera el Ziggurat por bloque. Las dos variantes producen
+// exactamente los mismos números; por defecto se usa AVX2 si el procesador lo admite (detección en
+// tiempo de ejecución). set_simd_level existe para los tests y las mediciones.
+enum class SimdLevel { Scalar = 0, Avx2 = 1 };
+SimdLevel simd_level_available();
+SimdLevel simd_level();
+void set_simd_level(SimdLevel level);   // se recorta a simd_level_available()
+
+// Generador del motor, por bloque: Z[d*ld + l] = scale * (normal nº g.pos + d del carril l), d en
+// [0,D), l en [0,n), n <= kLanes. Los carriles >= n no se tocan. Avanza g.pos en D.
+//   * BoxMuller / InverseCdf: los mismos números que fill_normals camino a camino.
+//   * Ziggurat: cada normal consume exactamente una palabra del generador del camino; la cuña y la
+//     cola usan un generador auxiliar sembrado con (camino, d). No coincide con el Ziggurat secuencial
+//     de fill_normals (otra tabla y otro uso de los bits), pero el resultado no depende del nivel SIMD,
+//     del nº de carriles ni del troceado: la normal d del camino p es función de (semilla, flujo,
+//     nivel, p, d).
+void fill_normals_lanes(NormalMethod method, LaneRng& g, int n, double* Z, int ld, int D, double scale);
 
 } // namespace mc::cpu

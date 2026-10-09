@@ -1,5 +1,7 @@
 #include "noise.hpp"
 
+#include <algorithm>
+
 namespace mc::cpu {
 
 namespace {
@@ -8,26 +10,26 @@ class RngStream final : public NoiseStream {
 public:
     RngStream(uint64_t seed, Stream stream, uint64_t level, int D, double scale,
               NormalMethod method, uint64_t first)
-        : seed_(seed), stream_(stream), level_(level), D_(D), scale_(scale), method_(method),
-          next_(first), tmp_((size_t)D) {}
+        : base_(Xoshiro256pp::path_hash_base(seed, stream, level)), D_(D), scale_(scale), method_(method),
+          next_(first) {}
 
+    // Por bloques de kLanes caminos: un generador por camino, avanzando intercalados (ver LaneRng).
     void fill(int n, double* Z, int ld) override {
-        for (int p = 0; p < n; p++) {
-            Xoshiro256pp g = Xoshiro256pp::for_path(seed_, stream_, level_, next_++);
-            fill_normals(method_, g, tmp_.data(), D_);
-            for (int d = 0; d < D_; d++) Z[(size_t)d * ld + p] = tmp_[d] * scale_;
+        for (int p0 = 0; p0 < n; p0 += kLanes) {
+            const int m = std::min(kLanes, n - p0);
+            LaneRng g;
+            g.seed(base_, next_);
+            next_ += (uint64_t)m;
+            fill_normals_lanes(method_, g, m, Z + p0, ld, D_, scale_);
         }
     }
 
 private:
-    uint64_t seed_;
-    Stream stream_;
-    uint64_t level_;
+    uint64_t base_;      // hash de (semilla, flujo, nivel)
     int D_;
     double scale_;
     NormalMethod method_;
     uint64_t next_;
-    std::vector<double> tmp_;
 };
 
 } // namespace

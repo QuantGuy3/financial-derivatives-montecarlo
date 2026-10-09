@@ -11,17 +11,13 @@
 // Heston recibe dos componentes no correlacionadas; el núcleo aplica la Cholesky 2x2.
 // Salida: Y[lane] = payoff (descontado donde corresponda) de cada camino del bloque.
 
+#include "lanes.hpp"
 #include "params.hpp"
 
 #include <algorithm>
 #include <cmath>
 
 namespace mc::cpu {
-
-#ifndef MC_LANES
-#define MC_LANES 8
-#endif
-inline constexpr int kLanes = MC_LANES;
 
 struct KCtx {
     const CpuModel*  m = nullptr;

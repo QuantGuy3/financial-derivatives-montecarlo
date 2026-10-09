@@ -21,3 +21,7 @@ target_compile_definitions(bench_cpu PRIVATE
 
 add_executable(bench_micro bench_micro.cpp)
 target_link_libraries(bench_micro PRIVATE mc_cpu mc_core mc_warnings)
+
+# Sonda de escalado por hilos (techo del hardware frente a sobrecarga del pool y de las rondas)
+add_executable(bench_scaling bench_scaling.cpp)
+target_link_libraries(bench_scaling PRIVATE mc_cpu mc_core mc_warnings)

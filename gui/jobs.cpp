@@ -44,8 +44,10 @@ void Job::finish(const std::string& final_state) {
 namespace {
 
 // Regula la cadencia de eventos de progreso: como máximo unos ~400 puntos por ejecución, repartidos de
-// forma aproximadamente logarítmica en n_done (las curvas de convergencia usan eje logarítmico) y
-// con un mínimo de 40 ms entre eventos.
+// forma aproximadamente logarítmica en n_done (las curvas de convergencia usan eje logarítmico).
+// Un punto se emite si n_done creció >= 25 % (siempre: así una ejecución rápida conserva ~10 puntos
+// por década y la curva no depende de la velocidad de la máquina), o si creció >= 3 % y han pasado
+// 40 ms desde el anterior (tope de cadencia para las ejecuciones largas).
 class JobSink : public ProgressSink {
 public:
     JobSink(Job& job, const ParsedRun& run) : job_(job), run_(run), t0_(std::chrono::steady_clock::now()) {}
@@ -54,8 +56,10 @@ public:
         const bool structural = (s.stage != Stage::Main);        // plan, piloto, niveles, duplicaciones, fin
         const double now = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0_).count();
         if (!structural && !s.is_final) {
-            const bool grew = last_n_ == 0 || (double)s.n_done >= 1.03 * (double)last_n_;
-            if (!grew || now - last_t_ < 0.04) return;
+            const bool first = (last_n_ == 0);
+            const bool grew_much = (double)s.n_done >= 1.25 * (double)last_n_;
+            const bool grew = (double)s.n_done >= 1.03 * (double)last_n_;
+            if (!first && !grew_much && !(grew && now - last_t_ >= 0.04)) return;
         }
         last_n_ = s.n_done;
         last_t_ = now;

@@ -7,6 +7,7 @@
 #include "../cpu/mc_cpu.hpp"
 #include "../cpu/noise.hpp"
 #include "../cpu/normal.hpp"
+#include "../cpu/path_sim.hpp"
 #include "../cpu/qmc_noise.hpp"
 #include "../cpu/rng.hpp"
 #include "../cpu/sobol.hpp"
@@ -117,6 +118,81 @@ void bench_e2e() {
     }
     const double per_step = 1e9 / ((double)N * steps);
     report("MC GBM europea 64 pasos 1 hilo (ns/paso)", {{"Box-Muller", best_bm * per_step}, {"Ziggurat", best_zig * per_step}});
+}
+
+// --- 1e. Desglose de un bloque de MC (ns por paso-camino): dónde se va el tiempo de W1/W2 ---------------------
+//   ruido (antes): un generador por camino, normales a un búfer y transposición al layout de los núcleos
+//   ruido (ahora): kLanes generadores intercalados escribiendo directamente (RngNoise)
+//   núcleo: kernel_single sobre un bloque de ruido fijo
+//   total: PathSim::run_chunk (ruido + núcleo + acumulación)
+void bench_breakdown() {
+    if (!selected("desglose")) return;
+    struct Case { const char* name; PayoffVariant pv; int steps; };
+    GBMParams gbm;
+    for (const Case& c : {Case{"GBM europea 64 pasos", European{100.0, 0.05, 1.0}, 64},
+                          Case{"GBM asiática 256 pasos", Asian{100.0}, 256}}) {
+        const CpuModel m = make_cpu_model(gbm);
+        const CpuPayoff pp = make_cpu_payoff(c.pv);
+        const int D = c.steps, W = kLanes;
+        const int blocks = (1 << 21) / (D * W);
+        const double scale = std::sqrt(m.T / D);
+        const double per = 1e9 / ((double)blocks * W * D);
+        std::vector<double> Z((size_t)D * W), tmp((size_t)D);
+
+        double t_old = best_of(reps, [&] {
+            uint64_t next = 0; double acc = 0;
+            for (int b = 0; b < blocks; b++) {
+                for (int l = 0; l < W; l++) {
+                    Xoshiro256pp g = Xoshiro256pp::for_path(1, Stream::Main, 0, next++);
+                    fill_normals(NormalMethod::Ziggurat, g, tmp.data(), D);
+                    for (int d = 0; d < D; d++) Z[(size_t)d * W + l] = tmp[(size_t)d] * scale;
+                }
+                acc += Z[(size_t)D * W - 1];
+            }
+            g_sink = acc;
+        }) * per;
+
+        RngNoise noise(1, Stream::Main, 0, D, scale, NormalMethod::Ziggurat);
+        auto time_noise = [&](SimdLevel lv) {
+            set_simd_level(lv);
+            const double t = best_of(reps, [&] {
+                auto st = noise.open(0, (uint64_t)blocks * W);
+                double acc = 0;
+                for (int b = 0; b < blocks; b++) { st->fill(W, Z.data(), W); acc += Z[(size_t)D * W - 1]; }
+                g_sink = acc;
+            }) * per;
+            set_simd_level(simd_level_available());
+            return t;
+        };
+        const double t_scalar = time_noise(SimdLevel::Scalar);
+        const double t_avx2 = time_noise(SimdLevel::Avx2);
+
+        const KCtx kc = make_kctx(m, pp, D);
+        SingleFn fn = select_single_kernel(m.kind, pp.kind);
+        double Y[kLanes];
+        double t_ker = best_of(reps, [&] {
+            double acc = 0;
+            for (int b = 0; b < blocks; b++) { fn(kc, Z.data(), W, Y); acc += Y[0]; }
+            g_sink = acc;
+        }) * per;
+
+        PathSim sim(m, pp, D, noise);
+        Scratch sc;
+        double t_tot = best_of(reps, [&] {
+            ChunkAcc out;
+            const int cp = sim.chunk_paths();
+            for (long long p0 = 0; p0 < (long long)blocks * W; p0 += cp)
+                sim.run_chunk((uint64_t)p0, (int)std::min<long long>(cp, (long long)blocks * W - p0), sc, out);
+            g_sink = out.acc.to_moments().mean;
+        }) * per;
+
+        report(std::string("desglose ") + c.name + " (ns/paso)",
+               {{"ruido: 1 generador por camino + transposición", t_old},
+                {"ruido por bloque, escalar", t_scalar},
+                {simd_level_available() == SimdLevel::Avx2 ? "ruido por bloque, AVX2" : "ruido por bloque, AVX2 (no disponible)", t_avx2},
+                {"núcleo (Euler + payoff)", t_ker},
+                {"total run_chunk", t_tot}});
+    }
 }
 
 // --- 2. Sobol scrambleado: versión ingenua de la GPU frente a Gray-code con V' = L·V ------------------------
@@ -281,6 +357,7 @@ int main(int argc, char** argv) {
     std::printf("bench_micro (un hilo, mejor de %d repeticiones)\n", reps);
     bench_normals();
     bench_e2e();
+    bench_breakdown();
     bench_pow();
     bench_sobol();
     bench_transforms();
