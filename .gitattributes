@@ -1,0 +1,4 @@
+# Los ficheros de referencia se comparan byte a byte: nunca convertir finales de linea
+tests/golden/* -text
+# Los scripts de shell deben quedar con LF tambien en Windows
+*.sh text eol=lf
