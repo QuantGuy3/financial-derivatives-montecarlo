@@ -23,8 +23,19 @@ void set_simd_level(SimdLevel level);    // para tests y mediciones; se recorta 
 #endif
 
 // Función compilada para AVX2 aunque el resto del fichero no lo esté.
-#if defined(__GNUC__) || defined(__clang__)
+#if defined(MC_X86_64) && (defined(__GNUC__) || defined(__clang__))
 #define MC_TARGET_AVX2 __attribute__((target("avx2")))
+#define MC_ALWAYS_INLINE inline __attribute__((always_inline))
+// Con GCC/Clang un bucle escrito una vez puede compilarse dos veces: el cuerpo va en una función
+// MC_ALWAYS_INLINE y se llama desde un envoltorio normal y desde otro MC_TARGET_AVX2, donde el
+// compilador lo vectoriza a 256 bits. Solo vale para bucles cuyos acumuladores son independientes
+// (el orden de las sumas de cada elemento no cambia), así que los bits son los mismos.
+#define MC_HAVE_AVX2_CLONES 1
 #else
 #define MC_TARGET_AVX2
+#if defined(_MSC_VER)
+#define MC_ALWAYS_INLINE __forceinline
+#else
+#define MC_ALWAYS_INLINE inline
+#endif
 #endif

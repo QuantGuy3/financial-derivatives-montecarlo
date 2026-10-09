@@ -1,6 +1,7 @@
 #include "qmc_noise.hpp"
 
 #include "../mc_types.hpp"
+#include "simd.hpp"
 
 #include <algorithm>
 #include <climits>
@@ -40,6 +41,74 @@ private:
     std::vector<uint32_t> x_;
     std::vector<double> tmp_;
 };
+
+// ---- núcleos de las transformaciones (se compilan también para AVX2, ver simd.hpp) ------------------
+//
+// En los dos el bucle interno recorre los caminos del bloque (p) y cada camino tiene su propio
+// acumulador, así que vectorizar a 2 o a 4 carriles no cambia el orden de ninguna suma.
+
+// Brownian Bridge: W en los nodos del puente y después incrementos. Z, W y out son [fila][PB].
+MC_ALWAYS_INLINE void bb_transform_body(const BBData& bb, const double* Z, double* W, double* out, int m) {
+    constexpr int PB = kTransformBlock;
+    const int N = bb.N;
+    std::memset(W, 0, sizeof(double) * PB);                      // W[0] = 0
+    {
+        double* wt = W + (size_t)bb.map_idx[0] * PB;
+        const double sd = bb.std_dev[0];
+        for (int p = 0; p < m; p++) wt[p] = sd * Z[p];
+    }
+    for (int step = 1; step < N; step++) {
+        double* wm = W + (size_t)bb.map_idx[step] * PB;
+        const double* wl = W + (size_t)bb.left_idx[step] * PB;
+        const double* wr = W + (size_t)bb.right_idx[step] * PB;
+        const double a = bb.weight_left[step], b = bb.weight_right[step], sd = bb.std_dev[step];
+        const double* z = Z + (size_t)step * PB;
+        for (int p = 0; p < m; p++) wm[p] = a * wl[p] + b * wr[p] + sd * z[p];
+    }
+    for (int k = 0; k < N; k++) {
+        const double* w1 = W + (size_t)(k + 1) * PB;
+        const double* w0 = W + (size_t)k * PB;
+        double* o = out + (size_t)k * PB;
+        for (int p = 0; p < m; p++) o[p] = w1[p] - w0[p];
+    }
+}
+
+// PCA: dW[i][p] = sum_k M(i,k) * Z[k][p]; M(i,k) = M[i + k*D] (column-major). GEMM por bloques de
+// IB filas para que el acumulador quepa en L1.
+MC_ALWAYS_INLINE void pca_transform_body(const double* M, int D, const double* Z, double* out, int m_cols) {
+    constexpr int PB = kTransformBlock;
+    constexpr int IB = 32;
+    double acc[IB][PB];
+    for (int i0 = 0; i0 < D; i0 += IB) {
+        const int ib = std::min(IB, D - i0);
+        for (int i = 0; i < ib; i++) std::memset(acc[i], 0, sizeof(double) * PB);
+        for (int k = 0; k < D; k++) {
+            const double* col = M + (size_t)k * D + i0;
+            const double* zk = Z + (size_t)k * PB;
+            for (int i = 0; i < ib; i++) {
+                const double mik = col[i];
+                for (int p = 0; p < m_cols; p++) acc[i][p] += mik * zk[p];
+            }
+        }
+        for (int i = 0; i < ib; i++)
+            std::memcpy(out + (size_t)(i0 + i) * PB, acc[i], sizeof(double) * PB);
+    }
+}
+
+void bb_transform_generic(const BBData& bb, const double* Z, double* W, double* out, int m) { bb_transform_body(bb, Z, W, out, m); }
+void pca_transform_generic(const double* M, int D, const double* Z, double* out, int m) { pca_transform_body(M, D, Z, out, m); }
+#ifdef MC_HAVE_AVX2_CLONES
+MC_TARGET_AVX2 void bb_transform_avx2(const BBData& bb, const double* Z, double* W, double* out, int m) { bb_transform_body(bb, Z, W, out, m); }
+MC_TARGET_AVX2 void pca_transform_avx2(const double* M, int D, const double* Z, double* out, int m) { pca_transform_body(M, D, Z, out, m); }
+#endif
+
+inline bool use_avx2_clones() {
+#if defined(MC_HAVE_AVX2_CLONES) && defined(MC_X86_64)
+    return simd_level() == SimdLevel::Avx2;
+#else
+    return false;
+#endif
+}
 
 // Base de las transformaciones por bloques: produce kTransformBlock caminos de una vez en un
 // buffer intermedio [D][PB] y entrega trozos de n carriles.
@@ -88,30 +157,10 @@ public:
 
 protected:
     void transform(int m) override {
-        constexpr int PB = kTransformBlock;
-        const int N = bb_.N;
-        double* W = W_.data();
-        const double* Z = zin_.data();
-        std::memset(W, 0, sizeof(double) * PB);                      // W[0] = 0
-        {
-            double* wt = W + (size_t)bb_.map_idx[0] * PB;
-            const double sd = bb_.std_dev[0];
-            for (int p = 0; p < m; p++) wt[p] = sd * Z[p];
-        }
-        for (int step = 1; step < N; step++) {
-            double* wm = W + (size_t)bb_.map_idx[step] * PB;
-            const double* wl = W + (size_t)bb_.left_idx[step] * PB;
-            const double* wr = W + (size_t)bb_.right_idx[step] * PB;
-            const double a = bb_.weight_left[step], b = bb_.weight_right[step], sd = bb_.std_dev[step];
-            const double* z = Z + (size_t)step * PB;
-            for (int p = 0; p < m; p++) wm[p] = a * wl[p] + b * wr[p] + sd * z[p];
-        }
-        for (int k = 0; k < N; k++) {
-            const double* w1 = W + (size_t)(k + 1) * PB;
-            const double* w0 = W + (size_t)k * PB;
-            double* out = stage_.data() + (size_t)k * PB;
-            for (int p = 0; p < m; p++) out[p] = w1[p] - w0[p];
-        }
+#ifdef MC_HAVE_AVX2_CLONES
+        if (use_avx2_clones()) { bb_transform_avx2(bb_, zin_.data(), W_.data(), stage_.data(), m); return; }
+#endif
+        bb_transform_generic(bb_, zin_.data(), W_.data(), stage_.data(), m);
     }
 
 private:
@@ -125,28 +174,11 @@ public:
         : StagedStream(std::move(inner), pca.m, count), pca_(pca) {}
 
 protected:
-    // dW[i][p] = sum_k M(i,k) * Z[k][p]; M(i,k) = M_pca[i + k*m] (column-major).
     void transform(int m_cols) override {
-        constexpr int PB = kTransformBlock;
-        constexpr int IB = 32;                       // filas de dW por bloque (acumulador en L1)
-        const int D = pca_.m;
-        const double* M = pca_.M_pca.data();
-        const double* Z = zin_.data();
-        double acc[IB][PB];
-        for (int i0 = 0; i0 < D; i0 += IB) {
-            const int ib = std::min(IB, D - i0);
-            for (int i = 0; i < ib; i++) std::memset(acc[i], 0, sizeof(double) * PB);
-            for (int k = 0; k < D; k++) {
-                const double* col = M + (size_t)k * D + i0;
-                const double* zk = Z + (size_t)k * PB;
-                for (int i = 0; i < ib; i++) {
-                    const double mik = col[i];
-                    for (int p = 0; p < m_cols; p++) acc[i][p] += mik * zk[p];
-                }
-            }
-            for (int i = 0; i < ib; i++)
-                std::memcpy(stage_.data() + (size_t)(i0 + i) * PB, acc[i], sizeof(double) * PB);
-        }
+#ifdef MC_HAVE_AVX2_CLONES
+        if (use_avx2_clones()) { pca_transform_avx2(pca_.M_pca.data(), pca_.m, zin_.data(), stage_.data(), m_cols); return; }
+#endif
+        pca_transform_generic(pca_.M_pca.data(), pca_.m, zin_.data(), stage_.data(), m_cols);
     }
 
 private:

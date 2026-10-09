@@ -253,3 +253,35 @@ TEST_CASE("run_qmc idéntico bit a bit con 1, 3, 8 y 16 hilos (Raw, BB, PCA)") {
 }
 
 } // TEST_SUITE
+
+TEST_SUITE("fast") {
+
+// Las transformaciones BB y PCA (y la inversa de la normal que las alimenta) tienen versión AVX2:
+// todo el flujo Sobol -> normales -> transformación debe dar los mismos bits con y sin ella.
+TEST_CASE("QMC: Sobol, Brownian Bridge y PCA identicos bit a bit con y sin AVX2") {
+    if (simd_level_available() != SimdLevel::Avx2) { MESSAGE("sin AVX2: nada que comparar"); return; }
+    for (int D : {8, 64, 100}) {
+        const double T = 1.0, sqrt_h = std::sqrt(T / D);
+        ScrambledSobol sob(1234u, D);
+        const BBData& bb = bb_precompute(D, T);
+        const PCAData& pca = pca_compute(D, T);
+        SobolNoise raw(sob, sqrt_h), unit(sob, 1.0);
+        BrownianBridgeNoise bbn(unit, bb);
+        PcaNoise pcan(unit, pca);
+        const NoiseSource* sources[] = {&raw, &bbn, &pcan};
+        for (const NoiseSource* src : sources) {
+            set_simd_level(SimdLevel::Scalar);
+            const auto ref = read_paths(*src, 5, 150, 8);     // 150 caminos: más de dos bloques de transformación
+            set_simd_level(SimdLevel::Avx2);
+            const auto got = read_paths(*src, 5, 150, 8);
+            REQUIRE(ref.size() == got.size());
+            bool same = true;
+            for (size_t i = 0; i < ref.size(); i++)
+                if (std::memcmp(ref[i].data(), got[i].data(), sizeof(double) * ref[i].size()) != 0) same = false;
+            CHECK_MESSAGE(same, "D=" << D << " fuente=" << (int)(src == &raw ? 0 : src == &bbn ? 1 : 2));
+        }
+    }
+    set_simd_level(simd_level_available());
+}
+
+} // TEST_SUITE
