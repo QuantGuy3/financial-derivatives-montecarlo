@@ -32,6 +32,16 @@ ctest --preset mingw-release          # ~130 pruebas (unitarias, estadísticas, 
 > adaptador de la fachada se compila y enlaza contra un *stub* con las mismas firmas, y la paridad CPU↔GPU se valida con
 > `tools/colab_validate.sh` (A100 en Colab). Hasta ejecutarlo en una GPU, la ruta CUDA debe considerarse **sin reverificar**.
 
+## Problemas conocidos
+
+* **Windows, Smart App Control** (modo "activado"): puede negarse a ejecutar un `.exe` recién enlazado sin firmar
+  (`Permission denied` en Git Bash, "An Application Control policy has blocked this file" en PowerShell; evento 3077 de
+  Code Integrity). El veredicto es por *hash* del binario y es intermitente: basta **reenlazar** (`touch` de un fuente del
+  destino y volver a compilar) y reintentar. Desactivar Smart App Control es una decisión del usuario (irreversible sin
+  reinstalar Windows); el proyecto no lo toca.
+* **Mediciones de rendimiento**: usa el equipo enchufado; en batería la CPU baja de frecuencia y los tiempos absolutos no
+  son comparables (ver `docs/perf/OPTIMIZACIONES.md`).
+
 ## Los cuatro métodos
 
 **Monte Carlo (MC).** Cada trayectoria se simula con un esquema de Euler (Euler–Milstein en la varianza para Heston) a partir de incrementos brownianos generados con `cuRAND` (generador pseudoaleatorio XORWOW). Un piloto inicial estima la varianza de la muestra y, a partir de ella, el número de trayectorias necesario para alcanzar la tolerancia `eps` objetivo (regla `N = 2·Var/eps²`); el resto de trayectorias se generan y evalúan en lotes (`N_batch`) dimensionados dinámicamente según la memoria libre de la GPU.
