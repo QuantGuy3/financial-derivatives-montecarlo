@@ -2,6 +2,7 @@
 // Normales estándar: inversa de la CDF (AS 241, precisión ~1e-16) y generadores.
 
 #include "rng.hpp"
+#include "simd.hpp"
 
 #include <cmath>
 
@@ -25,14 +26,6 @@ enum class NormalMethod {
 // Rellena z[0..n) con normales N(0,1) i.i.d. consumiendo el generador g, una detrás de otra.
 // Es el generador secuencial clásico; el motor NO lo usa (usa fill_normals_lanes).
 void fill_normals(NormalMethod method, Xoshiro256pp& g, double* z, int n);
-
-// Juego de instrucciones con el que se genera el Ziggurat por bloque. Las dos variantes producen
-// exactamente los mismos números; por defecto se usa AVX2 si el procesador lo admite (detección en
-// tiempo de ejecución). set_simd_level existe para los tests y las mediciones.
-enum class SimdLevel { Scalar = 0, Avx2 = 1 };
-SimdLevel simd_level_available();
-SimdLevel simd_level();
-void set_simd_level(SimdLevel level);   // se recorta a simd_level_available()
 
 // Generador del motor, por bloque: Z[d*ld + l] = scale * (normal nº g.pos + d del carril l), d en
 // [0,D), l en [0,n), n <= kLanes. Los carriles >= n no se tocan. Avanza g.pos en D.

@@ -11,11 +11,13 @@
 // Heston recibe dos componentes no correlacionadas; el núcleo aplica la Cholesky 2x2.
 // Salida: Y[lane] = payoff (descontado donde corresponda) de cada camino del bloque.
 
+#include "fastmath.hpp"
 #include "lanes.hpp"
 #include "params.hpp"
 
 #include <algorithm>
 #include <cmath>
+#include <vector>
 
 namespace mc::cpu {
 
@@ -29,7 +31,14 @@ struct KCtx {
     // Evaluadores con reducción de varianza (ver EvalSpec)
     double beta = 0.0, E_ctrl = 0.0;
     double z_step = 0.0;   // IS: desplazamiento por paso = z_star / sqrt(n_steps)
+    // Dupire: exp(-alpha·k·h) de cada paso, calculado una vez por simulación (antes se recalculaba en
+    // cada bloque de kLanes caminos: los mismos valores, n_steps llamadas a exp en vez de millones).
+    std::vector<double> exp_at;
 };
+
+inline bool model_is_dupire(const CpuModel& m) {
+    return m.kind == ModelKind::Dupire || m.kind == ModelKind::MultiDupire;
+}
 
 inline KCtx make_kctx(const CpuModel& m, const CpuPayoff& p, int n_steps, const EvalSpec& ev = {}) {
     KCtx c;
@@ -39,6 +48,10 @@ inline KCtx make_kctx(const CpuModel& m, const CpuPayoff& p, int n_steps, const 
     c.em = std::exp(-m.kappa * c.h);
     c.beta = ev.beta; c.E_ctrl = ev.E_ctrl;
     c.z_step = ev.z_star / std::sqrt((double)n_steps);
+    if (model_is_dupire(m)) {
+        c.exp_at.resize((size_t)n_steps);
+        for (int k = 0; k < n_steps; k++) c.exp_at[(size_t)k] = std::exp(-m.alpha * (k * c.h));
+    }
     return c;
 }
 
@@ -95,11 +108,27 @@ inline double euler_gbm(const CpuModel& m, double S, double dw, double h) {
 
 // sigma_loc(S,t) = sigma0 * exp(-alpha t) * (S/S0)^(beta-1);  e_t = exp(-alpha t) se pasa
 // calculado (compartido por todos los carriles del paso). S es absorbente en 0.
+// La potencia es fast_pow (fastmath.hpp), no std::pow: ver docs/perf.
 inline double euler_dupire(const CpuModel& m, double S, double dw, double h, double e_t, double S0_ref) {
     if (!(S > 0.0)) return 0.0;
-    const double sigma_loc = m.sigma0 * e_t * std::pow(S / S0_ref, m.beta_d - 1.0);
+    const double sigma_loc = m.sigma0 * e_t * fast_pow(S / S0_ref, m.beta_d - 1.0);
     const double Sn = S + m.mu * S * h + sigma_loc * S * dw;
     return Sn > 0.0 ? Sn : 0.0;
+}
+
+// Lo mismo para los kLanes carriles de un bloque (mismos bits que euler_dupire carril a carril): las
+// kLanes potencias se calculan juntas con fast_pow_n, que con AVX2 las evalúa de 4 en 4.
+inline void euler_dupire_block(const CpuModel& m, double* S, const double* dw, double h, double e_t, double S0_ref) {
+    constexpr int W = kLanes;
+    double x[W];
+    for (int l = 0; l < W; l++) x[l] = (S[l] > 0.0) ? S[l] / S0_ref : 1.0;   // carriles absorbidos: valor inocuo
+    fast_pow_n(x, m.beta_d - 1.0, x, W);
+    for (int l = 0; l < W; l++) {
+        const double Sl = S[l];
+        const double sigma_loc = m.sigma0 * e_t * x[l];
+        const double Sn = Sl + m.mu * Sl * h + sigma_loc * Sl * dw[l];
+        S[l] = (Sl > 0.0 && Sn > 0.0) ? Sn : 0.0;
+    }
 }
 
 // Heston: S usa la varianza ANTES de actualizar; V se actualiza con el esquema exacto en media
@@ -133,8 +162,7 @@ void kernel_single(const KCtx& c, const double* dW, int ld, double* Y) {
         if constexpr (MK == ModelKind::GBM) {
             for (int l = 0; l < W; l++) S[l] = euler_gbm(m, S[l], dw[l], h);
         } else if constexpr (MK == ModelKind::Dupire) {
-            const double e_t = std::exp(-m.alpha * (k * h));
-            for (int l = 0; l < W; l++) S[l] = euler_dupire(m, S[l], dw[l], h, e_t, m.S0);
+            euler_dupire_block(m, S, dw, h, c.exp_at[(size_t)k], m.S0);
         } else {
             static_assert(MK == ModelKind::Heston);
             for (int l = 0; l < W; l++) {
@@ -168,6 +196,7 @@ struct CKCtx {
     double em_f = 1.0, em_c = 1.0;   // exp(-kappa h) fino/grueso (Heston)
     double beta = 0.0, E_ctrl = 0.0; // CV
     double z_level = 0.0;            // IS: z_star / sqrt(n_fine)
+    std::vector<double> exp_f, exp_c; // Dupire: exp(-alpha·k·h_f) y exp(-alpha·k·h_c) por paso
 };
 
 inline CKCtx make_ckctx(const CpuModel& m, const CpuPayoff& p, int level, int M,
@@ -183,6 +212,12 @@ inline CKCtx make_ckctx(const CpuModel& m, const CpuPayoff& p, int level, int M,
     c.em_c = std::exp(-m.kappa * c.h_c);
     c.beta = ev.beta; c.E_ctrl = ev.E_ctrl;
     c.z_level = ev.z_star / std::sqrt((double)c.n_fine);
+    if (model_is_dupire(m)) {
+        c.exp_f.resize((size_t)c.n_fine);
+        for (int k = 0; k < c.n_fine; k++) c.exp_f[(size_t)k] = std::exp(-m.alpha * (k * c.h_f));
+        c.exp_c.resize((size_t)c.n_coarse);
+        for (int k = 0; k < c.n_coarse; k++) c.exp_c[(size_t)k] = std::exp(-m.alpha * (k * c.h_c));
+    }
     return c;
 }
 
@@ -213,11 +248,8 @@ void kernel_coupled(const CKCtx& c, const double* dW, int ld, double* Yf, double
                 Sf[l] = euler_gbm(m, Sf[l], dw[l], c.h_f);
             }
         } else if constexpr (MK == ModelKind::Dupire) {
-            const double e_t = std::exp(-m.alpha * (k * c.h_f));
-            for (int l = 0; l < W; l++) {
-                acc1[l] += dw[l];
-                Sf[l] = euler_dupire(m, Sf[l], dw[l], c.h_f, e_t, m.S0);
-            }
+            for (int l = 0; l < W; l++) acc1[l] += dw[l];
+            euler_dupire_block(m, Sf, dw, c.h_f, c.exp_f[(size_t)k], m.S0);
         } else {
             static_assert(MK == ModelKind::Heston);
             for (int l = 0; l < W; l++) {
@@ -237,11 +269,8 @@ void kernel_coupled(const CKCtx& c, const double* dW, int ld, double* Yf, double
                     acc1[l] = 0.0;
                 }
             } else if constexpr (MK == ModelKind::Dupire) {
-                const double e_t = std::exp(-m.alpha * (coarse_k * c.h_c));
-                for (int l = 0; l < W; l++) {
-                    Sc[l] = euler_dupire(m, Sc[l], acc1[l], c.h_c, e_t, m.S0);
-                    acc1[l] = 0.0;
-                }
+                euler_dupire_block(m, Sc, acc1, c.h_c, c.exp_c[(size_t)coarse_k], m.S0);
+                for (int l = 0; l < W; l++) acc1[l] = 0.0;
             } else {
                 for (int l = 0; l < W; l++) {
                     euler_heston(m, Sc[l], Vc[l], acc1[l], acc2[l], c.h_c, c.em_c);

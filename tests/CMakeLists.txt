@@ -9,6 +9,7 @@ add_executable(mc_tests
     test_sweep_format.cpp
     test_utils.cpp
     test_rng_normal.cpp
+    test_fastmath.cpp
     test_thread_pool.cpp
     test_sobol.cpp
     test_mc_cpu.cpp

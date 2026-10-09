@@ -43,12 +43,9 @@ void kernel_basket(const KCtx& c, const double* dW, int ld, double* Y, double* S
 
     for (int k = 0; k < c.n_steps; k++) {
         const double* dw = dW + (size_t)k * n * ld;
-        const double e_t = std::exp(-m.alpha * (k * h));
+        const double e_t = c.exp_at[(size_t)k];
         for (int a = 0; a < n; a++) {
-            const double* dwa = dw + (size_t)a * ld;
-            const double S0a = m.S0v[a];
-            for (int l = 0; l < W; l++)
-                S[a * W + l] = euler_dupire(m, S[a * W + l], dwa[l], h, e_t, S0a);
+            euler_dupire_block(m, S + (size_t)a * W, dw + (size_t)a * ld, h, e_t, m.S0v[a]);
         }
     }
     for (int l = 0; l < W; l++) {
@@ -119,11 +116,8 @@ void eval_cv_dupire(const KCtx& c, const double* dW, int ld, double* Y0, double*
     for (int l = 0; l < W; l++) Sd[l] = Sg[l] = m.S0;
     for (int k = 0; k < c.n_steps; k++) {
         const double* dw = dW + (size_t)k * ld;
-        const double e_t = std::exp(-m.alpha * (k * c.h));
-        for (int l = 0; l < W; l++) {
-            Sd[l] = euler_dupire(m, Sd[l], dw[l], c.h, e_t, m.S0);
-            Sg[l] = euler_gbm(m, Sg[l], dw[l], c.h);
-        }
+        euler_dupire_block(m, Sd, dw, c.h, c.exp_at[(size_t)k], m.S0);
+        for (int l = 0; l < W; l++) Sg[l] = euler_gbm(m, Sg[l], dw[l], c.h);
     }
     const double K = c.p->K, disc = c.p->discount;
     for (int l = 0; l < W; l++) {

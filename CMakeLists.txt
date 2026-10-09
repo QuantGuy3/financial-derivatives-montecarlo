@@ -75,6 +75,8 @@ target_link_libraries(mc_core PUBLIC Threads::Threads PRIVATE mc_warnings)
 # ---------------------------------------------------------------------------
 add_library(mc_cpu STATIC
     cpu/thread_pool.cpp
+    cpu/simd.cpp
+    cpu/fastmath.cpp
     cpu/normal.cpp
     cpu/noise.cpp
     cpu/sobol.cpp
