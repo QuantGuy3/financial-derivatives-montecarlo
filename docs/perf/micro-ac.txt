@@ -1,0 +1,32 @@
+bench_micro (un hilo, mejor de 7 repeticiones)
+normales (ns/normal)                     Box-Muller (log+sqrt+sincos)               11.060   x1.00
+normales (ns/normal)                     CDF inversa AS 241                          9.399   x1.18
+normales (ns/normal)                     Ziggurat 256 capas                          2.338   x4.73
+MC GBM europea 64 pasos 1 hilo (ns/paso) Box-Muller                                 11.666   x1.00
+MC GBM europea 64 pasos 1 hilo (ns/paso) Ziggurat                                    3.080   x3.79
+potencia (S/S0)^(beta-1) (ns/llamada)    std::pow                                   11.533   x1.00
+potencia (S/S0)^(beta-1) (ns/llamada)    std::exp(b*std::log(x))                    10.640   x1.08
+sobol palabras (ns/punto·dim)           ingenuo: 32 hashes + 32 popcounts          83.592   x1.00
+sobol palabras (ns/punto·dim)           Gray-code, V' = L·V (1 XOR)                0.307   x272.72
+sobol normales (ns/punto·dim)           ingenuo + AS 241                          102.830   x1.00
+sobol normales (ns/punto·dim)           Gray-code + AS 241                          9.493   x10.83
+PCA m=64 (ns/camino)                     producto ingenuo por camino              2460.742   x1.00
+PCA m=64 (ns/camino)                     GEMM por bloques (64 caminos)             808.105   x3.05
+PCA m=256 (ns/camino)                    producto ingenuo por camino            126176.953   x1.00
+PCA m=256 (ns/camino)                    GEMM por bloques (64 caminos)           10320.020   x12.23
+PCA m=1024 (ns/camino)                   producto ingenuo por camino           5523225.000   x1.00
+PCA m=1024 (ns/camino)                   GEMM por bloques (64 caminos)          156355.078   x35.32
+BB N=64 (ns/camino)                      bb_apply, 1 llamada por camino            107.544   x1.00
+BB N=64 (ns/camino)                      bb_apply con W reutilizado                 75.537   x1.42
+BB N=64 (ns/camino)                      flujo por bloques (incl. normales)        237.695   x0.45
+BB N=1024 (ns/camino)                    bb_apply, 1 llamada por camino           1744.849   x1.00
+BB N=1024 (ns/camino)                    bb_apply con W reutilizado               1607.129   x1.09
+BB N=1024 (ns/camino)                    flujo por bloques (incl. normales)       6106.396   x0.29
+pca_compute caché m=512 (ms)            por valor (copia, antes)                    0.312   x1.00
+pca_compute caché m=512 (ms)            por referencia (ahora)                      0.000   xinf
+PCA matriz m=512 (ms)                    m^2 llamadas a sin() (antes)                1.437   x1.00
+PCA matriz m=512 (ms)                    tabla de senos (ahora)                      0.191   x7.53
+pca_compute caché m=2048 (ms)           por valor (copia, antes)                    4.967   x1.00
+pca_compute caché m=2048 (ms)           por referencia (ahora)                      0.000   xinf
+PCA matriz m=2048 (ms)                   m^2 llamadas a sin() (antes)               22.798   x1.00
+PCA matriz m=2048 (ms)                   tabla de senos (ahora)                      2.853   x7.99

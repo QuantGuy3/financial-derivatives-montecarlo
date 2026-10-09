@@ -1,5 +1,5 @@
 #include <cstdlib>
-#include "../methods_cuda.cuh"
+#include "common.hpp"
 #include <cmath>
 #include <algorithm>
 #include <vector>
@@ -14,6 +14,7 @@ static int steps_for_eps(double eps, double c1, double T) {
 }
 
 int main(int argc, char** argv) {
+    mc_examples::init(argc, argv);
     // ── Parámetros ───────────────────────────────────────────────────────────
     DupireLocalParams dup;
     dup.S0     = 100.0;
@@ -39,7 +40,7 @@ int main(int argc, char** argv) {
 
     // ── c1 por Richardson (basado en el modelo Dupire principal) ─────────────
     auto sim_fn = [&](int ns, long long np, unsigned s) -> double {
-        return run_mc_fixed(mv_main, pv, ns, np, s).first;
+        return mc::run_mc_fixed(mv_main, pv, ns, np, s).first;
     };
     double c1 = estimar_c1_richardson(sim_fn, dup.T, 4, 50000);
 
@@ -48,7 +49,7 @@ int main(int argc, char** argv) {
     std::vector<double> eps_list = eps_scale_125(eps_finest);
 
     // ── Referencia: MC 500k para European Dupire ──────────────────────────────
-    double price_ref = run_mc_fixed(mv_main, pv, 256, 500000, 99u).first;
+    double price_ref = mc::run_mc_fixed(mv_main, pv, 256, 500000, 99u).first;
 
     // ── E[ctrl payoff] analítico bajo GBM (Black-Scholes, no depende de eps) ──
     double E_ctrl = bs_call(gbm_ctrl.S0, K, gbm_ctrl.T, r, gbm_ctrl.sigma);
@@ -61,7 +62,7 @@ int main(int argc, char** argv) {
     // beta se recalcula por nivel de eps (via n_steps, mismo Z para Dupire y GBM).
     auto beta_for_eps = [&](double eps) {
         int ns = steps_for_eps(eps, c1, dup.T);
-        CVPilot pilot = cv_pilot(mv_main, mv_ctrl, pv, pv, E_ctrl, ns, 50000);
+        CVPilot pilot = mc::cv_pilot(mv_main, mv_ctrl, pv, pv, E_ctrl, ns, 50000);
         return pilot.beta;
     };
 
@@ -71,23 +72,23 @@ int main(int argc, char** argv) {
     methods.push_back({"MC (Dupire)", [&](unsigned so, double eps) {
         int ns = steps_for_eps(eps, c1, dup.T);
         MCConfig c = mc_cfg; c.seed += so;
-        return run_mc_cuda(mv_main, pv, eps, ns, c);
+        return mc::run_mc(mv_main, pv, eps, ns, c);
     }});
     methods.push_back({"MC + CV (GBM)", [&](unsigned so, double eps) {
         int ns = steps_for_eps(eps, c1, dup.T);
         double beta = beta_for_eps(eps);
         MCConfig c = mc_cfg; c.seed += so;
-        return run_mc_cv_cuda(mv_main, mv_ctrl, pv, pv, E_ctrl, beta, eps, ns, c);
+        return mc::run_mc_cv(mv_main, mv_ctrl, pv, pv, E_ctrl, beta, eps, ns, c);
     }});
     methods.push_back({"QMC + CV (GBM)", [&](unsigned so, double eps) {
         int ns = steps_for_eps(eps, c1, dup.T);
         double beta = beta_for_eps(eps);
         QMCConfig c = qmc_cfg; c.seed += so;
-        return run_qmc_cv_cuda(mv_main, mv_ctrl, pv, pv, E_ctrl, beta, eps, ns, c);
+        return mc::run_qmc_cv(mv_main, mv_ctrl, pv, pv, E_ctrl, beta, eps, ns, c);
     }});
     methods.push_back({"MLMC", [&](unsigned so, double eps) {
         MLMCConfig c = ml_cfg; c.seed += so;
-        return run_mlmc_cuda(mv_main, pv, eps, c);
+        return mc::run_mlmc(mv_main, pv, eps, c);
     }});
 
     run_precision_sweep("ejemplo10_dupire_cv", methods, price_ref, eps_list);

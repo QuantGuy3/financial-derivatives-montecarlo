@@ -1,0 +1,49 @@
+bench_micro (un hilo, mejor de 7 repeticiones)
+normales (ns/normal)                     Box-Muller (log+sqrt+sincos)               11.615   x1.00
+normales (ns/normal)                     CDF inversa AS 241                          9.329   x1.25
+normales (ns/normal)                     Ziggurat 256 capas                          2.275   x5.10
+MC GBM europea 64 pasos 1 hilo (ns/paso) Box-Muller                                 13.202   x1.00
+MC GBM europea 64 pasos 1 hilo (ns/paso) Ziggurat                                    1.241   x10.64
+desglose GBM europea 64 pasos (ns/paso)  ruido: 1 generador por camino + transposición        2.401   x1.00
+desglose GBM europea 64 pasos (ns/paso)  ruido por bloque, escalar                   1.746   x1.38
+desglose GBM europea 64 pasos (ns/paso)  ruido por bloque, AVX2                      1.081   x2.22
+desglose GBM europea 64 pasos (ns/paso)  núcleo (Euler + payoff)                    0.122   x19.75
+desglose GBM europea 64 pasos (ns/paso)  total run_chunk                             1.221   x1.97
+desglose GBM asiática 256 pasos (ns/paso) ruido: 1 generador por camino + transposición        2.318   x1.00
+desglose GBM asiática 256 pasos (ns/paso) ruido por bloque, escalar                   1.622   x1.43
+desglose GBM asiática 256 pasos (ns/paso) ruido por bloque, AVX2                      0.999   x2.32
+desglose GBM asiática 256 pasos (ns/paso) núcleo (Euler + payoff)                    0.142   x16.29
+desglose GBM asiática 256 pasos (ns/paso) total run_chunk                             1.153   x2.01
+potencia (S/S0)^(beta-1) (ns/llamada)    std::pow                                   11.740   x1.00
+potencia (S/S0)^(beta-1) (ns/llamada)    std::exp(b*std::log(x))                    10.571   x1.11
+sobol palabras (ns/punto·dim)           ingenuo: 32 hashes + 32 popcounts          84.702   x1.00
+sobol palabras (ns/punto·dim)           Gray-code, V' = L·V (1 XOR)                0.306   x276.95
+sobol normales (ns/punto·dim)           ingenuo + AS 241                          100.668   x1.00
+sobol normales (ns/punto·dim)           Gray-code + AS 241                          3.856   x26.10
+[precompute] pca_compute m=64 T=1.00000 -> 0.002s
+PCA m=64 (ns/camino)                     producto ingenuo por camino              2083.203   x1.00
+PCA m=64 (ns/camino)                     GEMM por bloques (64 caminos)             462.305   x4.51
+[precompute] pca_compute m=256 T=1.00000 -> 0.000s
+PCA m=256 (ns/camino)                    producto ingenuo por camino            126052.051   x1.00
+PCA m=256 (ns/camino)                    GEMM por bloques (64 caminos)            4930.664   x25.56
+[precompute] pca_compute m=1024 T=1.00000 -> 0.005s
+PCA m=1024 (ns/camino)                   producto ingenuo por camino           5046367.969   x1.00
+PCA m=1024 (ns/camino)                   GEMM por bloques (64 caminos)           89680.078   x56.27
+[precompute] bb_precompute N=64 T=1.00000 -> 0.000s
+BB N=64 (ns/camino)                      bb_apply, 1 llamada por camino            110.425   x1.00
+BB N=64 (ns/camino)                      bb_apply con W reutilizado                 75.366   x1.47
+BB N=64 (ns/camino)                      flujo por bloques (incl. normales)        131.445   x0.84
+[precompute] bb_precompute N=1024 T=1.00000 -> 0.000s
+BB N=1024 (ns/camino)                    bb_apply, 1 llamada por camino           1779.980   x1.00
+BB N=1024 (ns/camino)                    bb_apply con W reutilizado               1614.014   x1.10
+BB N=1024 (ns/camino)                    flujo por bloques (incl. normales)       2803.711   x0.63
+[precompute] pca_compute m=512 T=1.00000 -> 0.002s
+pca_compute caché m=512 (ms)            por valor (copia, antes)                    0.290   x1.00
+pca_compute caché m=512 (ms)            por referencia (ahora)                      0.000   xinf
+PCA matriz m=512 (ms)                    m^2 llamadas a sin() (antes)                1.456   x1.00
+PCA matriz m=512 (ms)                    tabla de senos (ahora)                      0.193   x7.55
+[precompute] pca_compute m=2048 T=1.00000 -> 0.021s
+pca_compute caché m=2048 (ms)           por valor (copia, antes)                    5.044   x1.00
+pca_compute caché m=2048 (ms)           por referencia (ahora)                      0.000   xinf
+PCA matriz m=2048 (ms)                   m^2 llamadas a sin() (antes)               23.136   x1.00
+PCA matriz m=2048 (ms)                   tabla de senos (ahora)                      2.884   x8.02

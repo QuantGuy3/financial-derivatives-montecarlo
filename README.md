@@ -1,6 +1,46 @@
-# Financial Derivatives Monte Carlo (GPU / CUDA)
+# Financial Derivatives Monte Carlo (CPU multihilo + GPU / CUDA)
 
-Motor de valoración de derivados financieros en C++/CUDA, pensado para GPUs NVIDIA (objetivo `sm_80`, A100) con `cuRAND`, `cuBLAS` y `CUB`. Implementa cuatro familias de estimadores — Monte Carlo estándar (MC), Quasi-Monte Carlo (QMC), Multilevel Monte Carlo (MLMC) y Multilevel Quasi-Monte Carlo (MLQMC) — sobre varios modelos de precio (GBM, Heston, Dupire local, cestas multi-activo) y varios payoffs (europeas, asiáticas, lookback, barrera, basket), con soporte de reducción de varianza (variables de control, importance sampling) y de técnicas de reducción de dimensión efectiva (Brownian Bridge, PCA con Tensor Cores).
+Motor de valoración de derivados financieros en C++ con **dos backends**: CPU multihilo (determinista, `double`, sin
+dependencias) y GPU NVIDIA (CUDA, `float`, `cuRAND`/`cuBLAS`/`CUB`). Implementa cuatro familias de estimadores — Monte
+Carlo estándar (MC), Quasi-Monte Carlo (QMC), Multilevel Monte Carlo (MLMC) y Multilevel Quasi-Monte Carlo (MLQMC) —
+sobre varios modelos (GBM, Heston, Dupire local, cestas multi-activo) y payoffs (europeas, asiáticas, lookback, barrera,
+basket), con reducción de varianza (variables de control, importance sampling) y reducción de dimensión efectiva
+(Brownian Bridge, PCA).
+
+## Inicio rápido
+
+```bash
+cmake --preset mingw-release          # o linux-release / msvc-release (sin CUDA: solo CPU)
+cmake --build --preset mingw-release
+ctest --preset mingw-release          # ~140 pruebas (unitarias, estadísticas, determinismo, API de la GUI)
+
+./build/mingw-release/gui/mc_gui                      # interfaz gráfica (ver docs/GUI.md)
+./build/mingw-release/ejemplo01 0.01 --backend=cpu --threads=8   # ejemplo por línea de comandos
+```
+
+* **CPU o GPU**: todos los ejemplos aceptan `--backend=cpu|cuda --threads=N` (por defecto CUDA si el binario la incluye
+  y hay GPU; si no, la CPU con todos los hilos). `colab_build.sh` compila con CUDA.
+* **GUI** (`mc_gui`): ventana local con convergencia y trayectorias animadas, 11 ejemplos predefinidos, ES/EN y tema
+  claro/oscuro. Servidor interno solo en `127.0.0.1`; todo embebido en el ejecutable. → [`docs/GUI.md`](docs/GUI.md)
+* **Reproducibilidad**: el motor CPU da resultados **idénticos bit a bit con cualquier número de hilos**, y su QMC genera
+  los mismos puntos Sobol (con el mismo scrambling de Hong-Hickernell) que la GPU. → [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+* **Rendimiento y optimizaciones** medidas: [`docs/perf/OPTIMIZACIONES.md`](docs/perf/OPTIMIZACIONES.md). Ideas para la GPU,
+  sin aplicar: [`docs/GPU_OPTIMIZATION_IDEAS.md`](docs/GPU_OPTIMIZATION_IDEAS.md).
+
+> **Estado de la validación.** El backend CPU, la GUI y los tests se han desarrollado y ejecutado en un equipo **sin GPU**:
+> el código CUDA sigue siendo el original (solo se movió código de host y se añadió `cuda_device_available()`), el
+> adaptador de la fachada se compila y enlaza contra un *stub* con las mismas firmas, y la paridad CPU↔GPU se valida con
+> `tools/colab_validate.sh` (A100 en Colab). Hasta ejecutarlo en una GPU, la ruta CUDA debe considerarse **sin reverificar**.
+
+## Problemas conocidos
+
+* **Windows, Smart App Control** (modo "activado"): puede negarse a ejecutar un `.exe` recién enlazado sin firmar
+  (`Permission denied` en Git Bash, "An Application Control policy has blocked this file" en PowerShell; evento 3077 de
+  Code Integrity). El veredicto es por *hash* del binario y es intermitente: basta **reenlazar** (`touch` de un fuente del
+  destino y volver a compilar) y reintentar. Desactivar Smart App Control es una decisión del usuario (irreversible sin
+  reinstalar Windows); el proyecto no lo toca.
+* **Mediciones de rendimiento**: usa el equipo enchufado; en batería la CPU baja de frecuencia y los tiempos absolutos no
+  son comparables (ver `docs/perf/OPTIMIZACIONES.md`).
 
 ## Los cuatro métodos
 
@@ -26,10 +66,14 @@ El código evita carreras en varios niveles: (1) los parámetros del kernel (`Ke
 
 ## Estructura del repositorio
 
-- `models.hpp` / `payoffs.hpp`: parámetros de los modelos de precio (GBM, Heston, Dupire local, cesta Dupire multi-activo) y de los payoffs (europea, asiática aritmética/geométrica, lookback, barrera, basket), como `std::variant`.
-- `utils.hpp` / `utils.cpp`: fórmulas analíticas de referencia, precómputo de Brownian Bridge y PCA en CPU (Eigen), estimación del sesgo por Richardson, acumuladores *running* (`RunningStats`, media/varianza en un solo paso) y tablas de resultados.
-- `methods_cuda.cuh` / `methods_cuda.cu`: implementación GPU de los cuatro métodos (`run_mc_cuda`, `run_qmc_cuda`, `run_mlmc_cuda`, `run_mlqmc_cuda`), variables de control y importance sampling.
-- `examples/`: 11 ejemplos ejecutables (`ejemplo01`…`ejemplo11`) que cubren europea, asiática, lookback, barrera, Heston, Dupire, cestas correlacionadas/no correlacionadas, variables de control e importance sampling.
-- `colab_build.sh`: script de compilación pensado para un entorno Google Colab con GPU.
-- `informes_finales/`: informes de resultados numéricos generados sobre los ejemplos anteriores.
-- `gen_informe.py` / `gen_informe_completo.py`: generación automática de esos informes a partir de las salidas de los ejemplos.
+- `models.hpp` / `payoffs.hpp`: parámetros de los modelos (GBM, Heston, Dupire local, cesta Dupire) y payoffs (europea, asiática aritmética/geométrica, lookback, barrera, basket), como `std::variant`.
+- `mc_types.hpp`, `sweep.*`, `mc_progress.hpp`, `mc_format.hpp`: configuración y resultados comunes a ambos backends, barrido de precisión (`run_precision_sweep`), progreso/cancelación y formato de tablas.
+- `utils.*`: fórmulas analíticas de referencia, precómputo de Brownian Bridge y PCA (forma cerrada, sin Eigen, caché por referencia), Richardson, `RunningStats`. `reference_prices.*`: Black-Scholes con deriva, Asian geométrica y **Heston de Fourier**.
+- `methods_cuda.cuh` / `methods_cuda.cu`: backend GPU de los cuatro métodos, variables de control e importance sampling (código original).
+- `cpu/`: **motor CPU multihilo** (pool de hilos, RNG por camino, Sobol+Hong-Hickernell, núcleos, MC/QMC/MLMC/MLQMC, CV/IS, muestreador de trayectorias). → `docs/ARCHITECTURE.md`
+- `engine/`: fachada `mc::run_*` / `mc::run(RunSpec)` que despacha a CPU o GPU; `cuda_stub.cpp` para builds sin CUDA.
+- `gui/`: servidor local + interfaz web (`gui/web`), embebida en `mc_gui`. → `docs/GUI.md`
+- `examples/`: 11 ejemplos (`ejemplo01`…`ejemplo11`), con `--backend` y `--threads`.
+- `tests/`: suite de doctest (etiquetas `fast`, `stat`, `determinism`, `cuda`). `bench/`: `bench_cpu` (cargas W1–W8, escalado por hilos) y `bench_micro`. `tools/`: generadores de tablas y valores dorados, informe de benchmarks, scripts de Colab.
+- `docs/`: arquitectura, GUI, rendimiento (`docs/perf/`) e ideas para la GPU. `third_party/`: doctest, cpp-httplib, nlohmann/json, ECharts (con sus licencias).
+- `colab_build.sh`, `informes_finales/`, `resultados/`, `gen_informe*.py`: compilación en Colab e informes numéricos de la A100 (originales).

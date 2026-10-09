@@ -33,8 +33,10 @@ struct BBData {
     std::vector<double> std_dev;
 };
 
-// N debe ser potencia de 2
-BBData bb_precompute(int N, double T);
+// N debe ser potencia de 2.
+// Devuelve una referencia a la caché global (memoizada por (N,T), protegida por mutex):
+// es estable durante toda la ejecución y evita copiar los vectores en cada llamada.
+const BBData& bb_precompute(int N, double T);
 
 // Transforma normales Z_(n_sim×N) en incrementos brownianos dW_(n_sim×N) usando BB
 void bb_apply(const BBData& bb, double* Z, double* dW, int n_sim);
@@ -52,7 +54,9 @@ struct PCAData {
     std::vector<float>  M_pca_f32; // versión float32 para la GPU
 };
 
-PCAData pca_compute(int m, double T);
+// Referencia a la caché global (memoizada por (m,T), protegida por mutex). Layout de M_pca:
+// column-major (M_pca[i + k*m]); lo asume la GPU (cuBLAS) y también el motor CPU.
+const PCAData& pca_compute(int m, double T);
 
 
 // ------------------------------- //
