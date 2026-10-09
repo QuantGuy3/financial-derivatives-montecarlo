@@ -275,3 +275,46 @@ TEST_CASE("run_mc y run_mc_fixed idénticos bit a bit con 1, 3, 8 y 16 hilos") {
 }
 
 } // TEST_SUITE
+
+TEST_SUITE("determinism") {
+
+// Con un ProgressSink las rondas son finas (curva de convergencia); sin él, gruesas (menos esperas
+// entre rondas). El resultado no puede depender de eso: los chunks se funden uno a uno en orden.
+TEST_CASE("run_mc: mismo resultado bit a bit con y sin ProgressSink (rondas finas o gruesas)") {
+    struct Count : ProgressSink {
+        long long calls = 0;
+        void on_snapshot(const Snapshot&) override { ++calls; }
+    };
+    GBMParams g; PayoffVariant pv = Asian{100.0};
+    for (int threads : {1, 5}) {
+        CpuOptions o; o.threads = threads;
+        const MCResult a = run_mc(g, pv, 0.01, 32, MCConfig{}, o);
+        Count c; o.sink = &c;
+        const MCResult b = run_mc(g, pv, 0.01, 32, MCConfig{}, o);
+        CHECK(bits_equal(a.price, b.price));
+        CHECK(bits_equal(a.std_error, b.std_error));
+        CHECK(a.n_samples == b.n_samples);
+        CHECK(c.calls > 10);
+    }
+}
+
+TEST_CASE("make_wave_ends: cubre todos los chunks, crece y respeta el tope (fino y grueso)") {
+    for (bool fine : {true, false}) {
+        for (long long n : {1LL, 2LL, 63LL, 64LL, 65LL, 1000LL, 5000LL, 123457LL}) {
+            const auto ends = make_wave_ends(n, fine);
+            REQUIRE(!ends.empty());
+            CHECK(ends.back() == n);
+            long long prev = 0;
+            for (long long e : ends) {
+                CHECK(e > prev);
+                CHECK(e - prev <= (fine ? 256 : kMaxWaveChunks));
+                prev = e;
+            }
+        }
+        // el reparto es una función solo de n (determinista)
+        CHECK(make_wave_ends(5000, fine) == make_wave_ends(5000, fine));
+    }
+    CHECK(make_wave_ends(100000, false).size() < make_wave_ends(100000, true).size() / 4);
+}
+
+} // TEST_SUITE

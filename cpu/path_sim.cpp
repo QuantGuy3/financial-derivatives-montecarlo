@@ -6,14 +6,14 @@
 
 namespace mc::cpu {
 
-std::vector<long long> make_wave_ends(long long n_chunks) {
-    constexpr long long kMaxWave = 256;
+std::vector<long long> make_wave_ends(long long n_chunks, bool fine) {
     std::vector<long long> ends;
-    long long c = 0, wave = 1;
+    long long c = 0, wave = fine ? 1 : 64;
     while (c < n_chunks) {
         c = std::min(n_chunks, c + wave);
         ends.push_back(c);
-        wave = std::min(kMaxWave, std::max(wave + 1, wave * 5 / 4));
+        wave = fine ? std::min<long long>(256, std::max(wave + 1, wave * 5 / 4))
+                    : std::min<long long>(kMaxWaveChunks, wave * 2);
     }
     return ends;
 }
@@ -152,15 +152,15 @@ void CoupledSim::run_chunk(uint64_t first, int count, Scratch& s, ChunkAcc2& out
 }
 
 RangeResult simulate_range(ThreadPool& pool, const PathSim& sim, uint64_t first, long long N,
-                           const std::function<bool(const Moments&, long long)>& on_wave) {
+                           const std::function<bool(const Moments&, long long)>& on_wave, bool fine_waves) {
     RangeResult res;
     if (N <= 0) return res;
     const long long cp = sim.chunk_paths();
     const long long n_chunks = (N + cp - 1) / cp;
-    const auto ends = make_wave_ends(n_chunks);
+    const auto ends = make_wave_ends(n_chunks, fine_waves && on_wave);
 
     std::vector<Scratch> scratch(pool.threads());
-    std::vector<Padded<ChunkAcc>> slots((size_t)std::min<long long>(n_chunks, 256));
+    std::vector<Padded<ChunkAcc>> slots((size_t)std::min<long long>(n_chunks, kMaxWaveChunks));
 
     long long done_chunks = 0;
     for (long long wave_end : ends) {

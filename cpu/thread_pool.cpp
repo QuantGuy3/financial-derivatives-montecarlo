@@ -65,8 +65,9 @@ bool ThreadPool::parallel_for(std::size_t n_tasks,
                               const std::atomic<bool>* cancel) {
     if (n_tasks == 0) return true;
 
-    // Anidado, o pool de un solo hilo: en serie en el hilo actual.
-    if (tl_in_pool_task || n_threads_ == 1) {
+    // Anidado, pool de un solo hilo o una sola tarea: en serie en el hilo actual (despertar a los
+    // demás hilos para que no encuentren nada cuesta más que la tarea de un piloto pequeño).
+    if (tl_in_pool_task || n_threads_ == 1 || n_tasks == 1) {
         for (std::size_t t = 0; t < n_tasks; t++) {
             if (cancel && cancel->load(std::memory_order_relaxed)) return false;
             fn(t, 0);

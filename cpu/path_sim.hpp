@@ -39,9 +39,14 @@ inline int chunk_paths_for(double work_per_path) {
     return (n / kLanes) * kLanes;
 }
 
-// Finales acumulados (en nº de chunks) de cada ronda: crecen geométricamente y se limitan
-// a 256 chunks por ronda para poder cancelar con latencia baja. Determinista.
-std::vector<long long> make_wave_ends(long long n_chunks);
+// Finales acumulados (en nº de chunks) de cada ronda. Deterministas (no dependen del nº de hilos).
+//   fine = true:  1, x1.25, tope 256. Es el reparto de la curva de convergencia: ~10 puntos por
+//                 década de N. Lo usa quien tiene un ProgressSink escuchando.
+//   fine = false: 64, x2, tope 2048. Cuando nadie mira el progreso solo hace falta poder cancelar,
+//                 y cada frontera de ronda cuesta: los hilos esperan al último chunk de la ronda.
+// El reparto no cambia el resultado: los chunks se funden uno a uno en orden de índice.
+inline constexpr long long kMaxWaveChunks = 2048;
+std::vector<long long> make_wave_ends(long long n_chunks, bool fine = true);
 
 class PathSim {
 public:
@@ -76,9 +81,10 @@ struct RangeResult {
 };
 
 // Simula los caminos [first, first+N) en rondas, fundiendo en orden. Tras cada ronda llama a
-// on_wave(moments_acumulados, n_hechos) -> false para parar.
+// on_wave(moments_acumulados, n_hechos) -> false para parar. fine_waves elige el reparto en rondas
+// (ver make_wave_ends); sin on_wave siempre se usa el grueso.
 RangeResult simulate_range(ThreadPool& pool, const PathSim& sim, uint64_t first, long long N,
-                           const std::function<bool(const Moments&, long long)>& on_wave);
+                           const std::function<bool(const Moments&, long long)>& on_wave, bool fine_waves = true);
 
 // ---- niveles MLMC (fino/grueso acoplados) ---------------------------------------------------------
 

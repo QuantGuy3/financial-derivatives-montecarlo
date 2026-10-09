@@ -88,11 +88,12 @@ MCResult run_mc_eval(const ModelVariant& model, const PayoffVariant& payoff, con
     // ---- corrida principal --------------------------------------------------------------------
     RngNoise noise(cfg.seed, Stream::Main, 0, D, sqrt_h, opt.normal);
     PathSim sim(m, p, n_steps, noise, eval);
+    // Rondas finas solo si alguien escucha el progreso; si no, gruesas (basta poder cancelar).
     RangeResult mr = simulate_range(pool, sim, 0, N_needed,
         [&](const Moments& mo, long long n_done) {
             emit(Stage::Main, n_done, mo, false);
             return !should_stop();
-        });
+        }, opt.sink != nullptr);
     info.n_nonfinite += mr.nonfinite;
 
     const long long N_done = std::max<long long>(mr.moments.n, 1);
