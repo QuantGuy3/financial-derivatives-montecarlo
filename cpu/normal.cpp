@@ -6,19 +6,20 @@
 #include <numbers>
 #include <vector>
 
-#ifdef MC_X86_64
-#include <immintrin.h>
-#endif
+#include "fastmath.hpp"
+#include "fastmath_avx2.hpp"
 
 namespace mc::cpu {
 
 namespace {
 
-// Polinomio de grado 7 por Horner con coeficientes en orden ascendente.
+// Polinomio de grado 7 con coeficientes en orden ascendente, evaluado en árbol (Estrin):
+//   (c0 + c1 x) + x²(c2 + c3 x) + x⁴[(c4 + c5 x) + x²(c6 + c7 x)]
+// Por Horner serían 7 eslabones mul+add encadenados (42 ciclos de latencia sin FMA); así son 18, y la
+// inversa de la normal está limitada por esa latencia, no por el nº de operaciones.
 inline double poly7(const double (&c)[8], double x) {
-    double r = c[7];
-    for (int i = 6; i >= 0; --i) r = r * x + c[i];
-    return r;
+    const double x2 = x * x, x4 = x2 * x2;
+    return ((c[0] + c[1] * x) + x2 * (c[2] + c[3] * x)) + x4 * ((c[4] + c[5] * x) + x2 * (c[6] + c[7] * x));
 }
 
 // Coeficientes de AS 241 (PPND16)
@@ -61,8 +62,9 @@ double norm_inv_cdf(double p) {
         return q * poly7(A, r) / poly7(B, r);
     }
     // Colas: se trabaja con la probabilidad más pequeña (simetría) para no perder precisión.
-    double r = (q < 0.0) ? p : 1.0 - p;
-    r = std::sqrt(-std::log(r));
+    // El logaritmo es fast_log (el mismo que usa la versión vectorial), salvo para subnormales.
+    const double ps = (q < 0.0) ? p : 1.0 - p;
+    double r = std::sqrt(-(ps >= 2.2250738585072014e-308 ? fast_log(ps) : std::log(ps)));
     double val;
     if (r <= 5.0) {
         r -= 1.6;
@@ -72,6 +74,82 @@ double norm_inv_cdf(double p) {
         val = poly7(E, r) / poly7(F, r);
     }
     return (q < 0.0) ? -val : val;
+}
+
+// ---- inversa de la normal por bloque ----------------------------------------------------------------------------
+//
+// norm_inv_cdf_n evalúa norm_inv_cdf sobre un array. Con AVX2 va de 4 en 4: la zona central
+// (|p - 0.5| <= 0.425, el 85 % de los valores) se calcula siempre para los cuatro; si alguno cae en
+// la cola (48 % de los vectores) se calcula además la fórmula de la cola para los cuatro y se
+// mezclan. Solo la cola lejana (p < 1.4e-11) y los argumentos fuera de (0, 1) bajan al código
+// escalar. Las operaciones y su orden son los de norm_inv_cdf, así que los bits coinciden.
+
+namespace {
+
+#ifdef MC_X86_64
+
+MC_TARGET_AVX2 inline __m256d poly7_avx2(const double (&c)[8], __m256d x) {
+    const __m256d x2 = _mm256_mul_pd(x, x), x4 = _mm256_mul_pd(x2, x2);
+    const __m256d lo = _mm256_add_pd(_mm256_add_pd(_mm256_set1_pd(c[0]), _mm256_mul_pd(_mm256_set1_pd(c[1]), x)),
+                                     _mm256_mul_pd(x2, _mm256_add_pd(_mm256_set1_pd(c[2]), _mm256_mul_pd(_mm256_set1_pd(c[3]), x))));
+    const __m256d hi = _mm256_add_pd(_mm256_add_pd(_mm256_set1_pd(c[4]), _mm256_mul_pd(_mm256_set1_pd(c[5]), x)),
+                                     _mm256_mul_pd(x2, _mm256_add_pd(_mm256_set1_pd(c[6]), _mm256_mul_pd(_mm256_set1_pd(c[7]), x))));
+    return _mm256_add_pd(lo, _mm256_mul_pd(x4, hi));
+}
+
+// Cuatro valores. Devuelve false (sin escribir) si alguno necesita el código escalar.
+MC_TARGET_AVX2 inline bool norm_inv_cdf4(__m256d p, double* out) {
+    const __m256d absmask = _mm256_castsi256_pd(_mm256_set1_epi64x(0x7FFFFFFFFFFFFFFFLL));
+    const __m256d q = _mm256_sub_pd(p, _mm256_set1_pd(0.5));
+    const __m256d central = _mm256_cmp_pd(_mm256_and_pd(q, absmask), _mm256_set1_pd(0.425), _CMP_LE_OQ);
+    const __m256d rc = _mm256_sub_pd(_mm256_set1_pd(0.180625), _mm256_mul_pd(q, q));
+    const __m256d valc = _mm256_div_pd(_mm256_mul_pd(q, poly7_avx2(A, rc)), poly7_avx2(B, rc));
+    if (_mm256_movemask_pd(central) == 15) {
+        _mm256_storeu_pd(out, valc);
+        return true;
+    }
+    // Cola (r <= 5) para los cuatro carriles; los centrales calculan un valor que se descarta.
+    const __m256d neg = _mm256_cmp_pd(q, _mm256_setzero_pd(), _CMP_LT_OQ);
+    const __m256d ps = _mm256_blendv_pd(_mm256_sub_pd(_mm256_set1_pd(1.0), p), p, neg);
+    const __m256d rt = _mm256_sqrt_pd(_mm256_xor_pd(fast_log4_avx2(ps), _mm256_set1_pd(-0.0)));   // sqrt(-log ps)
+    // válido para la vía vectorial: 0 < p < 1, ps normal y r <= 5 (los NaN dan falso en todas las comparaciones)
+    const __m256d ok = _mm256_and_pd(_mm256_and_pd(_mm256_cmp_pd(p, _mm256_setzero_pd(), _CMP_GT_OQ),
+                                                   _mm256_cmp_pd(p, _mm256_set1_pd(1.0), _CMP_LT_OQ)),
+                                     _mm256_and_pd(_mm256_cmp_pd(ps, _mm256_set1_pd(2.2250738585072014e-308), _CMP_GE_OQ),
+                                                   _mm256_cmp_pd(rt, _mm256_set1_pd(5.0), _CMP_LE_OQ)));
+    if (_mm256_movemask_pd(_mm256_or_pd(central, ok)) != 15) return false;
+    const __m256d r = _mm256_sub_pd(rt, _mm256_set1_pd(1.6));
+    const __m256d val = _mm256_div_pd(poly7_avx2(C, r), poly7_avx2(D, r));
+    // signo: -val si q < 0
+    const __m256d valt = _mm256_xor_pd(val, _mm256_and_pd(neg, _mm256_set1_pd(-0.0)));
+    _mm256_storeu_pd(out, _mm256_blendv_pd(valt, valc, central));
+    return true;
+}
+
+MC_TARGET_AVX2 void norm_inv_cdf_n_avx2(const double* p, double* out, int n) {
+    int i = 0;
+    for (; i + 4 <= n; i += 4) {
+        if (!norm_inv_cdf4(_mm256_loadu_pd(p + i), out + i)) {
+            const double p0 = p[i], p1 = p[i + 1], p2 = p[i + 2], p3 = p[i + 3];
+            out[i] = norm_inv_cdf(p0); out[i + 1] = norm_inv_cdf(p1); out[i + 2] = norm_inv_cdf(p2); out[i + 3] = norm_inv_cdf(p3);
+        }
+    }
+    for (; i < n; i++) out[i] = norm_inv_cdf(p[i]);
+    _mm256_zeroupper();
+}
+
+#endif // MC_X86_64
+
+} // namespace
+
+void norm_inv_cdf_n(const double* p, double* out, int n) {
+#ifdef MC_X86_64
+    if (simd_level() == SimdLevel::Avx2) {
+        norm_inv_cdf_n_avx2(p, out, n);
+        return;
+    }
+#endif
+    for (int i = 0; i < n; i++) out[i] = norm_inv_cdf(p[i]);
 }
 
 // ---- Ziggurat secuencial (Marsaglia & Tsang 2000, 256 capas) ---------------------------------------------------

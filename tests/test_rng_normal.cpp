@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <vector>
 
 using namespace mc::cpu;
@@ -74,6 +75,81 @@ TEST_CASE("norm_inv_cdf: valores conocidos") {
     CHECK(norm_inv_cdf(0.0) == -INFINITY);
     CHECK(norm_inv_cdf(1.0) == INFINITY);
     CHECK(std::isnan(norm_inv_cdf(-0.1)));
+}
+
+// Valores de referencia calculados con mpmath (40 dígitos): cubren la zona central, los dos lados de
+// la frontera con la cola (|p - 0.5| = 0.425) y la cola hasta el uniforme más pequeño que puede dar
+// el Sobol de 32 bits, 0.5/2^32. La cola usa fast_log, así que esto también valida ese logaritmo.
+TEST_CASE("norm_inv_cdf: valores de referencia de alta precision (centro, frontera y colas)") {
+    const double ref[][2] = {
+        {1.16415321826934814453125e-10, -6.3379577545537892525},
+        {1e-8, -5.6120012441747887315},
+        {1e-5, -4.2648907939228246285},
+        {0.001, -3.0902323061678135415},
+        {0.02, -2.0537489106318230529},
+        {0.07, -1.4757910281791707352},
+        {0.0749, -1.4402382675279636232},
+        {0.0751, -1.4388253927525399831},
+        {0.08, -1.405071560309632556},
+        {0.25, -0.6744897501960817432},
+        {0.4, -0.2533471031357997988},
+        {0.6, 0.2533471031357997988},
+        {0.9249, 1.4388253927525399831},
+        {0.9251, 1.4402382675279636232},
+        {0.93, 1.4757910281791707352},
+        {0.999, 3.0902323061678135415},
+        {0.99999, 4.2648907939228246285},
+    };
+    for (const auto& r : ref) {
+        // en la cola superior 1 - p pierde dígitos del p decimal: de ahí la tolerancia mayor para p > 0.99
+        const double tol = (r[0] > 0.99) ? 1e-11 : 2e-15;
+        CHECK_MESSAGE(norm_inv_cdf(r[0]) == doctest::Approx(r[1]).epsilon(tol), "p=" << r[0]);
+    }
+}
+
+// La versión por bloque (AVX2 de 4 en 4) debe dar los mismos bits que norm_inv_cdf valor a valor.
+TEST_CASE("norm_inv_cdf_n: identico bit a bit a norm_inv_cdf, con y sin AVX2") {
+    Xoshiro256pp g = Xoshiro256pp::for_path(21, Stream::Test, 0, 0);
+    const int N = 200000;
+    std::vector<double> p((size_t)N), ref((size_t)N), out((size_t)N);
+    for (int kind = 0; kind < 4; kind++) {
+        for (int i = 0; i < N; i++) {
+            const double u = g.uniform_open();
+            double v;
+            if (kind == 0) v = u;                                                       // uniforme: 15 % en las colas
+            else if (kind == 1) v = ((double)(g.next() >> 32) + 0.5) * (1.0 / 4294967296.0);   // como el Sobol de 32 bits
+            else if (kind == 2) v = (i % 2) ? std::exp(-40.0 * u) : 1.0 - std::exp(-36.0 * u); // colas, incluida la lejana (p < 1.4e-11)
+            else {                                                                      // valores especiales mezclados
+                switch (i % 9) {
+                case 0: v = 0.0; break;
+                case 1: v = 1.0; break;
+                case 2: v = -0.25; break;
+                case 3: v = 1.5; break;
+                case 4: v = std::numeric_limits<double>::quiet_NaN(); break;
+                case 5: v = 5e-324; break;
+                case 6: v = 0.075; break;     // justo en la frontera centro/cola
+                case 7: v = 0.925; break;
+                default: v = u;
+                }
+            }
+            p[(size_t)i] = v;
+            ref[(size_t)i] = norm_inv_cdf(v);
+        }
+        for (SimdLevel lv : {SimdLevel::Scalar, SimdLevel::Avx2}) {
+            if (lv > simd_level_available()) continue;
+            set_simd_level(lv);
+            for (int n : {N, 1, 3, 4, 5, 7, 8, 63}) {
+                std::fill(out.begin(), out.begin() + n, -777.0);
+                norm_inv_cdf_n(p.data(), out.data(), n);
+                CHECK_MESSAGE(std::memcmp(out.data(), ref.data(), sizeof(double) * (size_t)n) == 0,
+                              "simd=" << (int)lv << " tipo=" << kind << " n=" << n);
+            }
+            std::vector<double> inplace(p.begin(), p.begin() + 101);     // en sitio
+            norm_inv_cdf_n(inplace.data(), inplace.data(), 101);
+            CHECK(std::memcmp(inplace.data(), ref.data(), sizeof(double) * 101) == 0);
+        }
+    }
+    set_simd_level(simd_level_available());
 }
 
 TEST_CASE("norm_inv_cdf: ida y vuelta con norm_cdf y simetria") {

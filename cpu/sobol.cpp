@@ -141,7 +141,9 @@ void ScrambledSobol::advance(uint64_t n, uint32_t* x) const {
 }
 
 void ScrambledSobol::normals_from_state(const uint32_t* x, double* out) const {
-    for (int d = 0; d < D_; d++) out[d] = norm_inv_cdf(sobol_word_to_u(x[d]));
+    // palabra -> uniforme en (0,1) en el propio array de salida, y la inversa en bloque
+    for (int d = 0; d < D_; d++) out[d] = sobol_word_to_u(x[d]);
+    norm_inv_cdf_n(out, out, D_);
 }
 
 void ScrambledSobol::fill_normals(uint64_t n0, int count, double* out) const {

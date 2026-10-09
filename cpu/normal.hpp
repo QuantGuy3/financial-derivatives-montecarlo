@@ -10,8 +10,13 @@ namespace mc::cpu {
 
 // Inversa de la CDF normal: Phi^{-1}(p), 0 < p < 1 (Wichura 1988, Algoritmo AS 241,
 // PPND16; coeficientes públicos del algoritmo publicado). Precisión relativa ~1e-16.
-// Fuera de (0,1) devuelve ±infinito.
+// Fuera de (0,1) devuelve ±infinito. Los polinomios se evalúan en árbol (Estrin) y el logaritmo de
+// la cola es fast_log: son los mismos pasos que hace la versión por bloque.
 double norm_inv_cdf(double p);
+
+// out[i] = norm_inv_cdf(p[i]), i en [0, n). Mismos bits; con AVX2 va de 4 en 4 (es lo que usa el
+// generador Sobol, donde la inversa era el 70 % del tiempo). p y out pueden ser el mismo array.
+void norm_inv_cdf_n(const double* p, double* out, int n);
 
 // CDF de la normal estándar.
 inline double norm_cdf(double x) { return 0.5 * std::erfc(-x / std::sqrt(2.0)); }
