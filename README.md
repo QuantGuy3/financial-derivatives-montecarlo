@@ -12,7 +12,7 @@ basket), con reducción de varianza (variables de control, importance sampling) 
 ```bash
 cmake --preset mingw-release          # o linux-release / msvc-release (sin CUDA: solo CPU)
 cmake --build --preset mingw-release
-ctest --preset mingw-release          # ~130 pruebas (unitarias, estadísticas, determinismo, API de la GUI)
+ctest --preset mingw-release          # ~140 pruebas (unitarias, estadísticas, determinismo, API de la GUI)
 
 ./build/mingw-release/gui/mc_gui                      # interfaz gráfica (ver docs/GUI.md)
 ./build/mingw-release/ejemplo01 0.01 --backend=cpu --threads=8   # ejemplo por línea de comandos

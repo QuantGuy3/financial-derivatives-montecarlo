@@ -292,12 +292,19 @@ int main(int argc, char** argv) {
             for (size_t mi = 0; mi < modes.size(); mi++) {
                 const std::string& mode = modes[mi];
                 double dt = 0;
-                if (mode == "raw") dt = run_raw(s, T, false, &chk);
-                else if (mode == "rawpin") dt = run_raw(s, T, true, &chk);
-                else if (mode == "spin") dt = run_spin(T, false, &chk);
-                else if (mode == "spinpin") dt = run_spin(T, true, &chk);
-                else if (mode == "flat") dt = run_flat(s, T, &chk);
-                else dt = run_engine(s, T, &chk);
+                // Cada medida se lanza desde un hilo recién creado. Así el hilo "que llama" de los modos
+                // con pool está en las mismas condiciones que los hilos propios de raw/spin (en Windows
+                // el hilo principal de un proceso en segundo plano puede ir más lento que uno nuevo, y
+                // eso falseaba la referencia de 1 hilo).
+                std::thread launcher([&] {
+                    if (mode == "raw") dt = run_raw(s, T, false, &chk);
+                    else if (mode == "rawpin") dt = run_raw(s, T, true, &chk);
+                    else if (mode == "spin") dt = run_spin(T, false, &chk);
+                    else if (mode == "spinpin") dt = run_spin(T, true, &chk);
+                    else if (mode == "flat") dt = run_flat(s, T, &chk);
+                    else dt = run_engine(s, T, &chk);
+                });
+                launcher.join();
                 if (r >= 0) t[mi].push_back(dt);
             }
         }

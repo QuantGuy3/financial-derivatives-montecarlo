@@ -24,12 +24,14 @@ Eigen y con caché por referencia; `methods_cuda.cu` solo pierde la cola de host
 
 > **El mismo binario produce resultados idénticos bit a bit con cualquier número de hilos.**
 
-Se sostiene en cuatro decisiones (todas con tests en la etiqueta `determinism`):
+Se sostiene en cinco decisiones (con tests en las etiquetas `determinism` y `fast`):
 
 1. **Semilla por camino.** El estado de `xoshiro256++` del camino *i* se deriva por hash de
    `(semilla, flujo, nivel, i)` (`cpu/rng.hpp`). Un camino vale lo mismo esté en el bloque, el chunk o el hilo
    que esté, y los primeros *n* caminos son los mismos sea cual sea *N* (propiedad de prefijo: ampliar la
-   precisión no repite ni descarta muestras).
+   precisión no repite ni descarta muestras). Con el Ziggurat, además, la normal nº *d* del camino *i* es
+   función solo de `(semilla, flujo, nivel, i, d)`: cada normal consume exactamente una palabra del generador
+   del camino, y los sorteos extra de la cuña y la cola salen de un generador auxiliar sembrado con *(i, d)*.
 2. **Chunks de tamaño fijo** que dependen solo del coste por camino (≈0,5–2 ms de trabajo), nunca del número de
    hilos (`cpu/path_sim.hpp::chunk_paths_for`).
 3. **Reducción en orden de índice.** Cada tarea escribe en su propia ranura (`Padded<T>` evita falso compartir) y
@@ -37,16 +39,23 @@ Se sostiene en cuatro decisiones (todas con tests en la etiqueta `determinism`):
    funden individualmente, por lo que ni siquiera la partición en "rondas" altera los bits.
 4. **Sin contracción FMA ni fast-math** en el motor (`-ffp-contract=off`), para que el compilador no escoja
    contracciones distintas en funciones distintas.
+5. **Las rutinas vectorizadas tienen un gemelo escalar con los mismos bits.** El binario es x86-64 genérico;
+   el generador de normales, la potencia de Dupire y la inversa de la normal tienen además una versión AVX2
+   (`cpu/simd.hpp`) que se elige al arrancar si el procesador la admite. Las dos versiones hacen las mismas
+   operaciones IEEE en el mismo orden, así que **el resultado no depende de si la máquina tiene AVX2**
+   (`test_rng_normal`, `test_fastmath` lo comprueban bit a bit, incluidos los casos fuera de rango).
 
 La garantía es **por binario**: otro compilador, otra libm u otra bandera `-march` cambian los últimos bits. Los
-tests entre plataformas son estadísticos.
+tests entre plataformas son estadísticos. (La potencia de Dupire y el logaritmo de la inversa de la normal usan
+tablas propias, no la libm, así que esa parte sí es igual en todas las plataformas.)
 
 ### Piezas
 
 | Fichero | Papel |
 |---|---|
 | `cpu/thread_pool.*` | Pool propio (sin OpenMP): contador atómico de tareas, excepciones, cancelación, llamadas anidadas en serie. |
-| `cpu/rng.hpp`, `cpu/normal.*` | `xoshiro256++`, inversa de la CDF (AS 241), Box–Muller, **Ziggurat** (por defecto). |
+| `cpu/rng.hpp`, `cpu/normal.*` | `xoshiro256++` (uno por camino, `kLanes` en SoA), **Ziggurat por bloque** (por defecto; 512 capas, AVX2 de 4 en 4), Box–Muller, inversa de la CDF (AS 241, por bloque para QMC). |
+| `cpu/simd.*`, `cpu/fastmath*` | Selección de AVX2 en tiempo de ejecución; `fast_pow` (potencia de la volatilidad local) con tablas generadas por `tools/gen_fastmath_tables.py`. |
 | `cpu/sobol.*`, `cpu/joe_kuo_data.cpp` | Sobol hasta 21 201 dimensiones (parámetros Joe-Kuo generados por `tools/gen_joe_kuo.py`) con el scrambling de Hong-Hickernell **idéntico al de la GPU**. |
 | `cpu/noise.*`, `cpu/qmc_noise.*` | `NoiseSource`/`NoiseStream`: cursores por chunk que entregan `Z[d*ld+p]` (mismo layout que la GPU). Pseudoaleatorio, Sobol, y las transformaciones Brownian Bridge y PCA por bloques. |
 | `cpu/kernels.*` | Núcleos de simulación: `kLanes` (8) caminos en paso sincronizado, plantillas Modelo × Payoff, cesta con Cholesky, par fino/grueso de MLMC, evaluadores CV/IS. |
@@ -69,8 +78,10 @@ tests entre plataformas son estadísticos.
 ### Progreso y cancelación
 
 `ProgressSink` (`mc_progress.hpp`) recibe `Snapshot`s **solo desde el hilo coordinador** y se consulta
-`should_cancel()` entre rondas (≤ 256 chunks, así la latencia de cancelación es de décimas de segundo).
-`max_seconds` devuelve la estimación parcial marcada `truncated`.
+`should_cancel()` entre rondas. Con un sink las rondas son finas (1, ×1,25, tope 256 chunks: unos 10 puntos por
+década en la curva de convergencia); sin él son gruesas (64, ×2, tope 2048), porque cada frontera de ronda hace
+esperar a los hilos. El reparto no cambia el resultado. `max_seconds` devuelve la estimación parcial marcada
+`truncated`.
 
 ## Diferencias deliberadas con la GPU
 
@@ -79,6 +90,8 @@ tests entre plataformas son estadísticos.
 | Precisión | `float` + `--use_fast_math` | `double`, sin fast-math |
 | Aleatorios (MC) | cuRAND XORWOW, semillas por lote | `xoshiro256++` por camino (la CPU no reproduce los números de la GPU en MC; en QMC **sí**: mismos puntos Sobol+HH) |
 | Dupire | sin guarda: `S ≤ 0` da NaN | `S` absorbente en 0; los caminos no finitos se excluyen y se cuentan (`n_nonfinite`) |
+| Paso de Euler | `S + μ·S·h + σ·S·ΔW` | la misma fórmula factorizada, `S·(1 + μ·h + σ·ΔW)` (menos operaciones) |
+| `(S/S₀)^(β−1)` de Dupire | `powf` | `fast_pow` (`cpu/fastmath.hpp`): error relativo < 4·10⁻¹⁶·(2 + \|b·ln x\|) |
 | MLMC + Heston + payoff dependiente del camino | el acumulador no se actualiza (resultado incorrecto) | se actualiza correctamente |
 | Matriz PCA | fp16 en Tensor Cores | `double` |
 | Cesta Dupire | normaliza con `S0[0]` | usa `S0[i]` de cada activo (idéntico si son iguales, como en los ejemplos) |
