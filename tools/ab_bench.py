@@ -36,7 +36,7 @@ def run_once(exe, flt, threads, reps, tmp):
             continue
         if r.returncode == 0 and out.exists():
             d = json.loads(out.read_text(encoding="utf-8"))
-            return {(x["id"], x["threads"]): x["median_s"] for x in d["results"]}
+            return {(x["id"], x["threads"]): (x["median_s"], x["min_s"]) for x in d["results"]}
         last = (r.stdout + r.stderr)[-400:]
     raise SystemExit(f"no se pudo ejecutar {exe}: {last}")
 
@@ -64,14 +64,17 @@ def main():
                     acc.setdefault(k, []).append(v)
             print(f"ronda {r + 1}/{args.rounds}", file=sys.stderr, flush=True)
 
-    lines = [f"| carga | hilos | {args.label_a} (s) | {args.label_b} (s) | A/B | por ronda (mín–máx) |",
-             "|---|---|---|---|---|---|"]
+    # Dos comparaciones: mediana de las medianas por ronda, y mínimo absoluto (el mejor tiempo que
+    # logró cada binario: robusto frente a los episodios de estrangulamiento térmico del portátil).
+    lines = [f"| carga | hilos | {args.label_a} (s) | {args.label_b} (s) | A/B (medianas) | por ronda (mín–máx) | A/B (mínimos) |",
+             "|---|---|---|---|---|---|---|"]
     for k in ta:
         if k not in tb:
             continue
-        a, b = statistics.median(ta[k]), statistics.median(tb[k])
-        per = [x / y for x, y in zip(ta[k], tb[k])]
-        lines.append(f"| {k[0]} | {k[1]} | {a:.4f} | {b:.4f} | ×{a / b:.3f} | ×{min(per):.2f}–×{max(per):.2f} |")
+        a, b = statistics.median(m for m, _ in ta[k]), statistics.median(m for m, _ in tb[k])
+        amin, bmin = min(m for _, m in ta[k]), min(m for _, m in tb[k])
+        per = [x[0] / y[0] for x, y in zip(ta[k], tb[k])]
+        lines.append(f"| {k[0]} | {k[1]} | {a:.4f} | {b:.4f} | ×{a / b:.3f} | ×{min(per):.2f}–×{max(per):.2f} | ×{amin / bmin:.3f} |")
     text = "\n".join(lines)
     print(text)
     if args.md:

@@ -226,7 +226,7 @@ CoupledPair sample_coupled(const ModelVariant& mv, const PayoffVariant& pv, int 
         cp.S_fine[(size_t)k + 1] = Sf;
         pef.update(run_f, Sf);
         if ((k + 1) % M == 0) {
-            if (m.kind == ModelKind::GBM) Sc = Sc + m.mu * Sc * c.h_c + m.sigma * Sc * acc1;
+            if (m.kind == ModelKind::GBM) Sc = euler_gbm(m, Sc, acc1, c.h_c);
             else if (m.kind == ModelKind::Dupire) Sc = euler_dupire(m, Sc, acc1, c.h_c, std::exp(-m.alpha * (ck * c.h_c)), m.S0);
             else euler_heston(m, Sc, Vc, acc1, acc2, c.h_c, c.em_c);
             acc1 = acc2 = 0.0;

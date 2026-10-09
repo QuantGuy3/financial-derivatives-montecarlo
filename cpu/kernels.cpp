@@ -163,7 +163,7 @@ void coupled_cv_asian(const CKCtx& c, const double* dW, int ld, double* Yf, doub
         }
         if ((k + 1) % c.M == 0) {
             for (int l = 0; l < W; l++) {
-                Sc[l] = Sc[l] + m.mu * Sc[l] * c.h_c + m.sigma * Sc[l] * acc[l];
+                Sc[l] = euler_gbm(m, Sc[l], acc[l], c.h_c);
                 acc[l] = 0.0;
                 if (c.n_coarse > 0) { ac[l] += Sc[l]; lc[l] += std::log(Sc[l]); }
             }
@@ -202,7 +202,7 @@ void coupled_is_call(const CKCtx& c, const double* dW, int ld, double* Yf, doubl
         }
         if ((k + 1) % c.M == 0) {
             for (int l = 0; l < W; l++) {
-                Sc[l] = Sc[l] + m.mu * Sc[l] * c.h_c + m.sigma * Sc[l] * acc[l];
+                Sc[l] = euler_gbm(m, Sc[l], acc[l], c.h_c);
                 acc[l] = 0.0;
             }
         }

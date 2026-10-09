@@ -102,8 +102,11 @@ inline double terminal_payoff(const CpuPayoff& p, double S_T, double run, int n_
 
 // ---- pasos de Euler por modelo (un carril) ---------------------------------------------------
 
+// El paso de Euler se escribe factorizado, S·(1 + mu·h + sigma·dW), no como S + mu·S·h + sigma·S·dW:
+// es la misma fórmula con 2 multiplicaciones y 1 suma en vez de 4 y 2, y la cadena de dependencias
+// entre pasos baja de 12 ciclos a 3 (1 + mu·h no depende del paso). Todos los modelos lo usan así.
 inline double euler_gbm(const CpuModel& m, double S, double dw, double h) {
-    return S + m.mu * S * h + m.sigma * S * dw;
+    return S * ((1.0 + m.mu * h) + m.sigma * dw);
 }
 
 // sigma_loc(S,t) = sigma0 * exp(-alpha t) * (S/S0)^(beta-1);  e_t = exp(-alpha t) se pasa
@@ -112,7 +115,7 @@ inline double euler_gbm(const CpuModel& m, double S, double dw, double h) {
 inline double euler_dupire(const CpuModel& m, double S, double dw, double h, double e_t, double S0_ref) {
     if (!(S > 0.0)) return 0.0;
     const double sigma_loc = m.sigma0 * e_t * fast_pow(S / S0_ref, m.beta_d - 1.0);
-    const double Sn = S + m.mu * S * h + sigma_loc * S * dw;
+    const double Sn = S * ((1.0 + m.mu * h) + sigma_loc * dw);
     return Sn > 0.0 ? Sn : 0.0;
 }
 
@@ -126,7 +129,7 @@ inline void euler_dupire_block(const CpuModel& m, double* S, const double* dw, d
     for (int l = 0; l < W; l++) {
         const double Sl = S[l];
         const double sigma_loc = m.sigma0 * e_t * x[l];
-        const double Sn = Sl + m.mu * Sl * h + sigma_loc * Sl * dw[l];
+        const double Sn = Sl * ((1.0 + m.mu * h) + sigma_loc * dw[l]);
         S[l] = (Sl > 0.0 && Sn > 0.0) ? Sn : 0.0;
     }
 }
@@ -136,7 +139,7 @@ inline void euler_dupire_block(const CpuModel& m, double* S, const double* dw, d
 inline void euler_heston(const CpuModel& m, double& S, double& V, double dw1, double dw2, double h, double em) {
     const double Vp = std::max(V, 0.0);
     const double sq = std::sqrt(Vp);
-    S = S + m.mu * S * h + sq * S * dw1;
+    S = S * ((1.0 + m.mu * h) + sq * dw1);
     V = m.theta + em * (V - m.theta) + m.xi * sq * dw2;
 }
 
@@ -265,7 +268,7 @@ void kernel_coupled(const CKCtx& c, const double* dW, int ld, double* Yf, double
         if ((k + 1) % c.M == 0) {
             if constexpr (MK == ModelKind::GBM) {
                 for (int l = 0; l < W; l++) {
-                    Sc[l] = Sc[l] + m.mu * Sc[l] * c.h_c + m.sigma * Sc[l] * acc1[l];
+                    Sc[l] = euler_gbm(m, Sc[l], acc1[l], c.h_c);
                     acc1[l] = 0.0;
                 }
             } else if constexpr (MK == ModelKind::Dupire) {
