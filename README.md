@@ -49,6 +49,7 @@ Los cuatro modelos nuevos funcionan con los cuatro métodos (MC, QMC, MLMC, MLQM
 ./build/estructurados mostrar mi.json              # valida y muestra la ficha con el perfil de pago
 ./build/estructurados valorar mi.json --griegas    # valora (GPU si hay; si no, CPU) y calcula sensibilidades
 ./build/estructurados replicar mi.json --comparar  # réplica estática con bono, subyacente y opciones
+./build/estructurados calibrar mercado.json --modelo heston --producto mi.json   # calibra y escribe el modelo
 ```
 
 **Definición.** Un producto es un fichero JSON con las secciones de una ficha de producto: mercado (tipo plano o curva), subyacentes (spot, nivel inicial, dividendos y modelo), correlación, cesta (peor, mejor, media o ponderada), calendario de observación, cupones (fijos, condicionales con o sin memoria, *range accrual*), autocancelación (con *step-down* y primas acumuladas), barrera de capital y barrera desactivante (observadas a vencimiento, en fechas, diariamente o de forma continua con corrección BGK) y la amortización final como suma de componentes (fijo, lineal, call, put, put vendida, digitales y cliquet, condicionados o no a la barrera). Los porcentajes se escriben como `"60%"`, los plazos como `"18M"` o `"3A"`, y se admiten fechas reales para productos ya vivos. La referencia completa está en [`estructurados/FORMATO.md`](estructurados/FORMATO.md) y en `productos/` hay un ejemplo de cada familia.
@@ -106,6 +107,27 @@ Aquí está integrada en el programa y ampliada:
 
 Los detalles del formato, de la cadena CSV y de las opciones de `replicar` están en [`estructurados/FORMATO.md`](estructurados/FORMATO.md#réplica-estática-con-opciones).
 
+## Calibración
+
+```bash
+./build/estructurados calibrar productos/mercado_ejemplo_sx5e.json --modelo heston     # a una superficie de volatilidades
+./build/estructurados calibrar spx.csv --modelo bates --optimizador de --volumen-min 10   # a una cadena real (CSV)
+./build/estructurados calibrar productos/mercado_ejemplo_sx5e.json --modelo svi        # SVI por vencimiento, con control de arbitraje
+./build/estructurados calibrar mercado.json --modelo heston --producto productos/phoenix_worst_of.json --subyacente SX5E
+./build/estructurados historico precios.csv                                          # BS / Merton por máxima verosimilitud, Hurst
+```
+
+- **Datos**: superficie de volatilidades o cotizaciones en JSON, o la misma cadena CSV de la réplica (con columnas de yfinance). Forward y descuento de cada vencimiento implícitos por **paridad put-call** cuando hay calls y puts del mismo strike; se usa la opción fuera del dinero de cada strike; filtros de plazo, moneyness y volumen.
+- **Objetivo** en volatilidad implícita, con pesos iguales, por vega o por la horquilla bid-ask. Parámetros con rangos impuestos por transformación logística.
+- **Optimizadores** propios: Levenberg-Marquardt con varios puntos de partida (por defecto), evolución diferencial + LM (global) y Nelder-Mead + LM.
+- **Precios rápidos**: Fourier de Lewis con la función característica evaluada una vez por vencimiento y control Black-Scholes (Heston, Bates, NIG), serie de Merton, Hagan (SABR) y Monte Carlo con números aleatorios comunes para la volatilidad local.
+- **Diagnóstico**: errores estándar y correlaciones de los parámetros (identificabilidad), parámetros en el borde, condición de Feller, ajuste por strike en puntos básicos y fracción dentro de la horquilla; salida en JSON y CSV.
+- **SVI** por vencimiento con comprobación de arbitraje de mariposa y de calendario.
+- **Histórico**: Black-Scholes y Merton por máxima verosimilitud con contraste de razón de verosimilitudes, y exponentes de Hurst del precio y de la log-volatilidad.
+- El modelo calibrado se escribe en el subyacente de un producto (`--producto`), listo para valorar.
+
+Detalles en [`estructurados/CALIBRACION.md`](estructurados/CALIBRACION.md).
+
 **Validación.** `tests/test_estructurados.cpp` contrasta el motor con precios cerrados o semianalíticos: casos deterministas exactos (cupón cero, bono con curva, memoria, range accrual, cliquet, autocancelación), Black-Scholes (call, put, digital, reverse convertible, put down-and-in continua frente a Reiner-Rubinstein, shark fin), los siete modelos (Fourier, serie de Merton, Hagan, martingala), cestas worst-of/best-of frente a la normal bivariante, QMC y la equivalencia precisión simple/doble. Si hay GPU, compara además GPU y CPU trayectoria a trayectoria.
 
 ## Compilación
@@ -126,10 +148,10 @@ Sin `nvcc` (o con `-DMC_USAR_CUDA=OFF`) se compila igualmente la parte CPU: el p
 - `methods_cuda.cuh` / `methods_cuda.cu`: implementación GPU de los cuatro métodos (`run_mc_cuda`, `run_qmc_cuda`, `run_mlmc_cuda`, `run_mlqmc_cuda`), variables de control e importance sampling.
 - `hd_comun.hpp` / `modelos_hd.hpp`: código compartido CPU/GPU — Philox4x32-10, Sobol con scrambling de Hong-Hickernell, inversa de la normal y los pasos de los siete modelos de subyacente.
 - `referencias.hpp` / `referencias.cpp`: precios de referencia (Black-Scholes con dividendos, digitales y barreras, Merton, Fourier para Heston/Bates/NIG, Hagan para SABR, normal bivariante).
-- `estructurados/`: módulo de productos estructurados — lectura/escritura JSON (`json.*`), definición y validación (`producto.*`), fórmulas de pago (`expresion.*`), ficha (`ficha.cpp`), plantillas y asistente (`plantillas.*`, `asistente.*`), núcleo de simulación (`simulacion_hd.hpp`, `plan.hpp`), motores CPU y GPU (`motor_cpu.cpp`, `motor_gpu.cu`), valoración y griegas (`valoracion.*`), precios de opciones europeas por modelo y volatilidad implícita (`vanilla.*`), cadenas de opciones en CSV (`cotizaciones.*`), perfiles lineales a trozos y su descomposición de Carr-Madan (`perfil.*`), réplica estática (`replicacion.*`), programa `estructurados` (`main.cpp`) y la referencia del formato (`FORMATO.md`).
+- `estructurados/`: módulo de productos estructurados — lectura/escritura JSON (`json.*`), definición y validación (`producto.*`), fórmulas de pago (`expresion.*`), ficha (`ficha.cpp`), plantillas y asistente (`plantillas.*`, `asistente.*`), núcleo de simulación (`simulacion_hd.hpp`, `plan.hpp`), motores CPU y GPU (`motor_cpu.cpp`, `motor_gpu.cu`), valoración y griegas (`valoracion.*`), precios de opciones europeas por modelo y volatilidad implícita (`vanilla.*`), cadenas de opciones en CSV (`cotizaciones.*`), perfiles lineales a trozos y su descomposición de Carr-Madan (`perfil.*`), réplica estática (`replicacion.*`), optimizadores (`optimizacion.*`), datos de mercado (`mercado.*`), calibración y SVI (`calibracion.*`), estimación histórica (`historico.*`), programa `estructurados` (`main.cpp`), la referencia del formato (`FORMATO.md`) y la de la calibración (`CALIBRACION.md`).
 - `herramientas/disenador_productos.html`: diseñador visual de productos (HTML autocontenido) que genera el JSON; incluye el dibujo del pago y su réplica estática.
 - `herramientas/descargar_cadena.py`: descarga una cadena de opciones de Yahoo Finance (yfinance) al CSV que lee el programa.
-- `productos/`: productos de ejemplo en JSON (Phoenix, Athena, reverse convertible, capital protegido, bonus, twin-win, shark fin, range accrual, cliquet, opción europea, un autocallable vivo con fechas reales, un pago dibujado y uno con fórmula) y una cadena de opciones sintética (`cadena_ejemplo_spx.csv`) para probar la réplica con strikes cotizados.
+- `productos/`: productos de ejemplo en JSON (Phoenix, Athena, reverse convertible, capital protegido, bonus, twin-win, shark fin, range accrual, cliquet, opción europea, un autocallable vivo con fechas reales, un pago dibujado y uno con fórmula), una cadena de opciones sintética (`cadena_ejemplo_spx.csv`) para la réplica con strikes cotizados y una superficie de volatilidades sintética (`mercado_ejemplo_sx5e.json`) para la calibración.
 - `examples/`: 15 ejemplos ejecutables (`ejemplo01`…`ejemplo15`) que cubren europea, asiática, lookback, barrera, Heston, Dupire, cestas correlacionadas/no correlacionadas, variables de control, importance sampling, Merton, Bates, SABR y NIG.
 - `tests/`: tests del módulo de productos estructurados.
 - `colab_build.sh`: script de compilación pensado para un entorno Google Colab con GPU.

@@ -46,6 +46,9 @@ public:
     // Precio de la call y de la digital (paga 1 si S_T ≥ K)
     double call(double S, double K, double r, double q) const;
     double digital(double S, double K, double r, double q) const;
+    // Forma "forward": F = E[S_T] y DF = factor de descuento a T
+    double call_fwd(double F, double K, double DF) const;
+    double put_fwd(double F, double K, double DF) const;
     size_t nodos() const { return u_.size(); }
 
 private:
@@ -73,6 +76,10 @@ public:
     // Declara de una vez los vencimientos que se van a pedir (el Monte Carlo los
     // simula juntos en una sola pasada)
     void preparar(const std::vector<double>& vencimientos);
+    // Precios con un forward y un descuento dados (p. ej. implícitos en el mercado):
+    // la distribución del modelo se reescala para que E[S_T] = F y se descuenta con DF
+    double call_fwd(double T, double K, double F, double DF);
+    double put_fwd(double T, double K, double F, double DF);
     std::string metodo() const;
     bool es_mc() const { return metodo_ == Metodo::MC; }
 

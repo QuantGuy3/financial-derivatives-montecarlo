@@ -107,6 +107,27 @@ double IntegralLewis::call(double S, double K, double r, double q) const {
     return ref::bs_precio(true, S, K, T_, r, q, sigma_ref_) - A * d;
 }
 
+namespace {
+double black_fwd(bool call, double F, double K, double T, double DF, double s) {
+    const double sv = s * std::sqrt(T);
+    if (!(sv > 0)) return DF * std::max(call ? F - K : K - F, 0.0);
+    const double d1 = (std::log(F / K) + 0.5 * sv * sv) / sv, d2 = d1 - sv;
+    return call ? DF * (F * ncdf(d1) - K * ncdf(d2)) : DF * (K * ncdf(-d2) - F * ncdf(-d1));
+}
+} // namespace
+
+double IntegralLewis::call_fwd(double F, double K, double DF) const {
+    double d = 0.0;
+    delta(std::log(F / K), &d, nullptr);
+    return black_fwd(true, F, K, T_, DF, sigma_ref_) - DF * std::sqrt(F * K) * d;
+}
+
+double IntegralLewis::put_fwd(double F, double K, double DF) const {
+    double d = 0.0;
+    delta(std::log(F / K), &d, nullptr);
+    return black_fwd(false, F, K, T_, DF, sigma_ref_) - DF * std::sqrt(F * K) * d;
+}
+
 double IntegralLewis::digital(double S, double K, double r, double q) const {
     // D = -∂C/∂K; con C = C_BS - √S·e^{-(r+q)T/2}·√K·Δ(k), dk/dK = -1/K
     const double k = std::log(S / K) + (r - q) * T_;
@@ -122,8 +143,26 @@ double IntegralLewis::digital(double S, double K, double r, double q) const {
 
 struct PreciosVanilla::Muestra {
     double T = 0, DF = 1, F = 0;
-    std::vector<double> S;   // ordenadas
+    double media = 1;        // media de las S simuladas (sin reescalar)
+    std::vector<double> S;   // simuladas, ordenadas (sin reescalar)
     std::vector<double> pre; // pre[i] = Σ_{j<i} S[j]
+    // E[(c·S - K)⁺] y E[(K - c·S)⁺] con c = F/media (ajuste del forward)
+    double call_esp(double K, double Fobj) const {
+        const double c = Fobj / media, k = K / c;
+        const size_t n = S.size();
+        size_t i = (size_t)(std::upper_bound(S.begin(), S.end(), k) - S.begin());
+        return c * ((pre[n] - pre[i]) - k * (double)(n - i)) / (double)n;
+    }
+    double put_esp(double K, double Fobj) const {
+        const double c = Fobj / media, k = K / c;
+        size_t i = (size_t)(std::upper_bound(S.begin(), S.end(), k) - S.begin());
+        return c * (k * (double)i - pre[i]) / (double)S.size();
+    }
+    double prob_mayor_igual(double K, double Fobj) const {
+        const double k = K * media / Fobj;
+        size_t i = (size_t)(std::lower_bound(S.begin(), S.end(), k) - S.begin());
+        return (double)(S.size() - i) / (double)S.size();
+    }
 };
 
 PreciosVanilla::PreciosVanilla(const Activo& a, const Curva& c, OpcionesMCVanilla mc, bool forzar_mc)
@@ -276,11 +315,10 @@ void PreciosVanilla::simular(const std::vector<double>& Ts_in) {
         mu->T = Ts[j];
         mu->DF = curva_.df(Ts[j]);
         mu->F = forward(Ts[j]);
-        // Ajuste del forward (los precios cumplen exactamente la paridad put-call)
+        // Ajuste del forward al valorar (los precios cumplen exactamente la paridad put-call)
         double media = std::accumulate(S[j].begin(), S[j].end(), 0.0) / (double)n;
-        double f = (media > 0 && std::isfinite(media)) ? mu->F / media : 1.0;
+        mu->media = (media > 0 && std::isfinite(media)) ? media : mu->F;
         mu->S = std::move(S[j]);
-        for (double& s : mu->S) s *= f;
         std::sort(mu->S.begin(), mu->S.end());
         mu->pre.assign(mu->S.size() + 1, 0.0);
         for (size_t i = 0; i < mu->S.size(); ++i) mu->pre[i + 1] = mu->pre[i] + mu->S[i];
@@ -300,10 +338,7 @@ double PreciosVanilla::call(double T, double K) {
         case Metodo::HAGAN: return ref::sabr_precio(true, S0_, K, T, r, q_, m["alpha"], m["beta"], m["rho"], m["nu"]);
         default: {
             const Muestra& mu = muestra(T);
-            const size_t n = mu.S.size();
-            size_t i = (size_t)(std::upper_bound(mu.S.begin(), mu.S.end(), K) - mu.S.begin());
-            double suma = (mu.pre[n] - mu.pre[i]) - K * (double)(n - i);
-            return mu.DF * suma / (double)n;
+            return mu.DF * mu.call_esp(K, mu.F);
         }
     }
 }
@@ -327,10 +362,40 @@ double PreciosVanilla::put(double T, double K) {
         case Metodo::HAGAN: return ref::sabr_precio(false, S0_, K, T, r, q_, m["alpha"], m["beta"], m["rho"], m["nu"]);
         default: {
             const Muestra& mu = muestra(T);
-            const size_t n = mu.S.size();
-            size_t i = (size_t)(std::upper_bound(mu.S.begin(), mu.S.end(), K) - mu.S.begin());
-            double suma = K * (double)i - mu.pre[i];
-            return mu.DF * suma / (double)n;
+            return mu.DF * mu.put_esp(K, mu.F);
+        }
+    }
+}
+
+double PreciosVanilla::call_fwd(double T, double K, double F, double DF) {
+    if (T <= 0) return DF * std::max(F - K, 0.0);
+    const Modelo& m = act_.modelo;
+    switch (metodo_) {
+        case Metodo::BS: return black_fwd(true, F, K, T, DF, m["volatilidad"]);
+        case Metodo::FOURIER: return std::max(0.0, lewis(T).call_fwd(F, K, DF));
+        case Metodo::MC: return DF * muestra(T).call_esp(K, F);
+        default: {
+            // Merton / Hagan: precio con r y q equivalentes a (F, DF)
+            const double r = -std::log(DF) / T, q = r - std::log(F / S0_) / T;
+            if (metodo_ == Metodo::MERTON)
+                return ref::merton_precio(true, S0_, K, T, r, q, m["volatilidad"], m["lambda"], m["media_salto"], m["vol_salto"]);
+            return ref::sabr_precio(true, S0_, K, T, r, q, m["alpha"], m["beta"], m["rho"], m["nu"]);
+        }
+    }
+}
+
+double PreciosVanilla::put_fwd(double T, double K, double F, double DF) {
+    if (T <= 0) return DF * std::max(K - F, 0.0);
+    const Modelo& m = act_.modelo;
+    switch (metodo_) {
+        case Metodo::BS: return black_fwd(false, F, K, T, DF, m["volatilidad"]);
+        case Metodo::FOURIER: return std::max(0.0, lewis(T).put_fwd(F, K, DF));
+        case Metodo::MC: return DF * muestra(T).put_esp(K, F);
+        default: {
+            const double r = -std::log(DF) / T, q = r - std::log(F / S0_) / T;
+            if (metodo_ == Metodo::MERTON)
+                return ref::merton_precio(false, S0_, K, T, r, q, m["volatilidad"], m["lambda"], m["media_salto"], m["vol_salto"]);
+            return ref::sabr_precio(false, S0_, K, T, r, q, m["alpha"], m["beta"], m["rho"], m["nu"]);
         }
     }
 }
@@ -344,8 +409,7 @@ double PreciosVanilla::digital(double T, double K, bool es_call) {
         case Metodo::FOURIER: dc = lewis(T).digital(S0_, K, r, q_); break;
         case Metodo::MC: {
             const Muestra& mu = muestra(T);
-            size_t i = (size_t)(std::lower_bound(mu.S.begin(), mu.S.end(), K) - mu.S.begin());
-            dc = mu.DF * (double)(mu.S.size() - i) / (double)mu.S.size();
+            dc = mu.DF * mu.prob_mayor_igual(K, mu.F);
         } break;
         default: {
             const double h = 1e-4 * K;

@@ -50,6 +50,10 @@ set(EST_FUENTES
     estructurados/vanilla.cpp
     estructurados/cotizaciones.cpp
     estructurados/replicacion.cpp
+    estructurados/optimizacion.cpp
+    estructurados/mercado.cpp
+    estructurados/calibracion.cpp
+    estructurados/historico.cpp
     estructurados/ficha.cpp
     estructurados/plantillas.cpp
     estructurados/asistente.cpp

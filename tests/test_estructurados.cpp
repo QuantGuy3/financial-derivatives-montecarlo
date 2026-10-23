@@ -7,8 +7,12 @@
 // Los casos deterministas (volatilidad 0, autocancelación segura...) se exigen
 // exactos. Uso: ./test_estructurados [rapido]
 
+#include "estructurados/calibracion.hpp"
 #include "estructurados/cotizaciones.hpp"
 #include "estructurados/expresion.hpp"
+#include "estructurados/historico.hpp"
+#include "estructurados/mercado.hpp"
+#include "estructurados/optimizacion.hpp"
 #include "estructurados/perfil.hpp"
 #include "estructurados/plan.hpp"
 #include "estructurados/plantillas.hpp"
@@ -20,6 +24,7 @@
 
 #include <fstream>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -790,6 +795,244 @@ void test_cadenas_csv() {
     resultado(peor < 1e-12 && r.lineas.size() == 11, "Réplica con strikes cotizados: exacta en los strikes", buf);
 }
 
+// ------------------------------------------------------------------------- //
+// Calibración                                                                //
+// ------------------------------------------------------------------------- //
+
+// Superficie de volatilidades generada con un modelo conocido (precios exactos)
+DatosMercado superficie_sintetica(const Modelo& mod, double ruido_pb = 0.0) {
+    DatosMercado m;
+    m.subyacente = "SINT";
+    m.fuente = "superficie sintética";
+    m.spot = 100;
+    m.r = 0.03;
+    m.q = 0.01;
+    Activo a;
+    a.spot = a.nivel_inicial = 100;
+    a.dividendos = m.q;
+    a.modelo = mod;
+    Curva c;
+    c.t = {1.0};
+    c.r = {m.r};
+    OpcionesMCVanilla omc;
+    omc.trayectorias = 400000;
+    PreciosVanilla pv(a, c, omc);
+    uint64_t estado = 12345;
+    auto normal = [&]() { // Box-Muller con un generador lineal congruente (reproducible)
+        auto u = [&]() { estado = estado * 6364136223846793005ULL + 1442695040888963407ULL; return ((estado >> 11) + 0.5) / 9007199254740992.0; };
+        double u1 = u(), u2 = u();
+        return std::sqrt(-2 * std::log(u1)) * std::cos(6.283185307179586 * u2);
+    };
+    for (double T : {0.25, 0.5, 1.0, 2.0}) {
+        VencimientoMercado v;
+        v.T = T;
+        v.etiqueta = num(T);
+        v.DF = std::exp(-m.r * T);
+        v.F = 100 * std::exp((m.r - m.q) * T);
+        for (double k : {0.7, 0.8, 0.9, 0.95, 1.0, 1.05, 1.1, 1.2, 1.35}) {
+            PuntoMercado p;
+            p.v = (int)m.vencimientos.size();
+            p.T = T;
+            p.K = 100 * k;
+            p.call = p.K >= v.F;
+            double pr = p.call ? pv.call_fwd(T, p.K, v.F, v.DF) : pv.put_fwd(T, p.K, v.F, v.DF);
+            p.vol = vol_implicita_fwd(pr, p.call, v.F, p.K, T, v.DF) + ruido_pb * 1e-4 * normal();
+            p.precio = black(p.call, v.F, p.K, T, v.DF, p.vol);
+            p.vega = vega_black(v.F, p.K, T, v.DF, p.vol);
+            v.puntos.push_back((int)m.puntos.size());
+            m.puntos.push_back(p);
+        }
+        m.vencimientos.push_back(v);
+    }
+    return m;
+}
+
+Modelo modelo_con(const std::string& tipo, std::initializer_list<std::pair<const char*, double>> ps) {
+    Modelo mod = modelo_por_defecto(buscar_modelo(tipo)->tipo);
+    for (auto& [k, v] : ps) mod[k] = v;
+    return mod;
+}
+
+void test_optimizadores() {
+    // Rosenbrock: r = (10·(y - x²), 1 - x), mínimo en (1, 1)
+    opt::FuncResiduos ros = [](const std::vector<double>& x, std::vector<double>& r) {
+        r = {10.0 * (x[1] - x[0] * x[0]), 1.0 - x[0]};
+        return true;
+    };
+    opt::Resultado a = opt::levenberg_marquardt(ros, {-1.2, 1.0});
+    resultado(std::fabs(a.x[0] - 1) < 1e-8 && std::fabs(a.x[1] - 1) < 1e-8, "Levenberg-Marquardt: Rosenbrock", a.motivo);
+    opt::FuncObjetivo fr = [](const std::vector<double>& x) {
+        return 100 * std::pow(x[1] - x[0] * x[0], 2) + std::pow(1 - x[0], 2);
+    };
+    opt::Resultado b = opt::nelder_mead(fr, {-1.2, 1.0});
+    resultado(std::fabs(b.x[0] - 1) < 1e-4 && std::fabs(b.x[1] - 1) < 1e-4, "Nelder-Mead: Rosenbrock", b.motivo);
+    // Rastrigin 2D (muchos mínimos locales): la evolución diferencial encuentra el global
+    opt::FuncObjetivo ras = [](const std::vector<double>& x) {
+        double s = 20;
+        for (double v : x) s += v * v - 10 * std::cos(6.283185307179586 * v);
+        return s;
+    };
+    opt::OpcionesDE ode;
+    ode.generaciones = 300;
+    opt::Resultado c = opt::evolucion_diferencial(ras, {-5.12, -5.12}, {5.12, 5.12}, ode);
+    resultado(c.f < 1e-6, "Evolución diferencial: Rastrigin (mínimo global)", "f = " + num(c.f));
+}
+
+void test_calibracion() {
+    struct Caso { const char* nombre; Modelo mod; double tol; };
+    std::vector<Caso> casos = {
+        {"black_scholes", modelo_con("black_scholes", {{"volatilidad", 0.27}}), 1e-6},
+        {"heston", modelo_con("heston", {{"vol_inicial", 0.18}, {"kappa", 2.5}, {"vol_largo_plazo", 0.22}, {"xi", 0.7}, {"rho", -0.75}}), 1e-3},
+        {"merton", modelo_con("merton", {{"volatilidad", 0.15}, {"lambda", 0.4}, {"media_salto", -0.12}, {"vol_salto", 0.18}}), 1e-3},
+        {"nig", modelo_con("nig", {{"sigma", 0.2}, {"theta", -0.15}, {"kappa", 0.4}}), 1e-3},
+        {"sabr", modelo_con("sabr", {{"alpha", 0.21}, {"beta", 0.7}, {"nu", 0.6}, {"rho", -0.45}}), 1e-4},
+    };
+    for (const auto& c : casos) {
+        DatosMercado m = superficie_sintetica(c.mod);
+        OpcionesCalibracion o;
+        o.modelo = c.nombre;
+        ResultadoCalibracion r = calibrar(m, o);
+        double peor = 0;
+        const auto& d = def_modelo(c.mod.tipo);
+        for (size_t i = 0; i < d.params.size(); ++i)
+            peor = std::max(peor, std::fabs(r.modelo.valores[i] - c.mod.valores[i]) / std::max(0.1, std::fabs(c.mod.valores[i])));
+        char buf[120];
+        std::snprintf(buf, sizeof buf, "RMSE %.1e pb, máx. error relativo de parámetros %.1e", 1e4 * r.rmse, peor);
+        resultado(peor < c.tol && r.rmse < 1e-5, std::string("Calibración: recupera ") + d.nombre, buf);
+    }
+    // Con ruido de 20 pb: los parámetros quedan dentro de 4 errores estándar
+    {
+        Modelo verdad = casos[1].mod;
+        DatosMercado m = superficie_sintetica(verdad, 20.0);
+        OpcionesCalibracion o;
+        o.modelo = "heston";
+        ResultadoCalibracion r = calibrar(m, o);
+        bool ok = r.rmse > 1e-4 && r.rmse < 4e-3;
+        std::string det;
+        for (const auto& p : r.params) {
+            if (!p.libre) continue;
+            double z = (p.valor - verdad[p.clave]) / p.error;
+            ok &= p.error > 0 && std::fabs(z) < 4;
+            det += p.clave + " " + num(std::round(z * 10) / 10) + "σ  ";
+        }
+        resultado(ok, "Calibración con ruido: Heston dentro de su error estándar", det);
+    }
+    // SVI: recupera una superficie SVI exacta
+    {
+        DatosMercado m = superficie_sintetica(casos[1].mod);
+        const double sp[5] = {0.02, 0.15, -0.5, 0.05, 0.2};
+        for (auto& v : m.vencimientos)
+            for (int i : v.puntos) {
+                PuntoMercado& p = m.puntos[(size_t)i];
+                double k = std::log(p.K / v.F), d = k - sp[3];
+                double w = sp[0] * v.T + sp[1] * v.T * (sp[2] * d + std::sqrt(d * d + sp[4] * sp[4]));
+                p.vol = std::sqrt(w / v.T);
+                p.precio = black(p.call, v.F, p.K, v.T, v.DF, p.vol);
+                p.vega = vega_black(v.F, p.K, v.T, v.DF, p.vol);
+            }
+        OpcionesCalibracion o;
+        o.modelo = "svi";
+        ResultadoCalibracion r = calibrar(m, o);
+        bool ok = r.svi.size() == 4 && r.rmse < 1e-6;
+        for (size_t v = 0; v < r.svi.size(); ++v) {
+            double T = m.vencimientos[v].T;
+            ok &= std::fabs(r.svi[v].rho - sp[2]) < 1e-3 && std::fabs(r.svi[v].m - sp[3]) < 1e-3 &&
+                  std::fabs(r.svi[v].b - sp[1] * T) < 1e-3 && r.svi[v].g_min > 0;
+        }
+        resultado(ok, "SVI: recupera los parámetros y no detecta arbitraje", "RMSE " + num(r.rmse));
+    }
+    // Volatilidad local por Monte Carlo con números comunes (solo en el modo completo)
+    if (g_escala >= 1.0) {
+        Modelo verdad = modelo_con("vol_local", {{"sigma0", 0.2}, {"alpha", 0.3}, {"beta", 0.4}});
+        DatosMercado m = superficie_sintetica(verdad);
+        OpcionesCalibracion o;
+        o.modelo = "vol_local";
+        o.trayectorias_mc = 40000;
+        ResultadoCalibracion r = calibrar(m, o);
+        resultado(std::fabs(r.modelo["sigma0"] - 0.2) < 0.01 && std::fabs(r.modelo["beta"] - 0.4) < 0.1,
+                  "Calibración por Monte Carlo: volatilidad local", "sigma0 " + num(r.modelo["sigma0"]) + ", beta " + num(r.modelo["beta"]));
+    }
+}
+
+void test_mercado_y_paridad() {
+    // Cadena con calls y puts exactos de Black-Scholes con r = 4%, q = 1%: la paridad
+    // devuelve exactamente el forward y el descuento
+    {
+        std::ofstream f("prueba_paridad.csv");
+        f << "# spot: 100\nvencimiento,tipo,strike,precio\n";
+        for (double T : {0.5, 1.0})
+            for (int K = 80; K <= 120; K += 5)
+                for (bool call : {true, false})
+                {
+                    char buf[64];
+                    std::snprintf(buf, sizeof buf, "%.17g", ref::bs_precio(call, 100, K, T, 0.04, 0.01, 0.2 + 0.001 * (100 - K)));
+                    f << (T == 0.5 ? "6M" : "1A") << "," << (call ? "call" : "put") << "," << K << "," << buf << "\n";
+                }
+    }
+    DatosMercado m = cargar_mercado("prueba_paridad.csv");
+    std::remove("prueba_paridad.csv");
+    bool ok = m.vencimientos.size() == 2;
+    for (const auto& v : m.vencimientos) {
+        ok &= v.forward_implicito && std::fabs(v.DF - std::exp(-0.04 * v.T)) < 1e-9 &&
+              std::fabs(v.F - 100 * std::exp(0.03 * v.T)) < 1e-7;
+    }
+    double peor = 0;
+    for (const auto& p : m.puntos) peor = std::max(peor, std::fabs(p.vol - (0.2 + 0.001 * (100 - p.K))));
+    resultado(ok && peor < 1e-9, "Mercado: forward y descuento implícitos por paridad put-call", "");
+    resultado(std::all_of(m.puntos.begin(), m.puntos.end(), [&](const PuntoMercado& p) {
+                  return p.call == (p.K >= m.vencimientos[(size_t)p.v].F); }),
+              "Mercado: se usa la opción fuera del dinero de cada strike", "");
+    // Fichero JSON con una superficie (strikes relativos y un hueco)
+    {
+        std::ofstream f("prueba_superficie.json");
+        f << R"J({"spot": 4800, "tipo_interes": "3%", "dividendos": "2%",
+                 "superficie": {"vencimientos": ["6M", "1A"], "strikes": ["90%", "100%", "110%"],
+                                "volatilidades": [["22%", "20%", null], ["21.5%", "20%", "19%"]]}})J";
+    }
+    DatosMercado s = cargar_mercado("prueba_superficie.json");
+    std::remove("prueba_superficie.json");
+    resultado(s.puntos.size() == 5 && std::fabs(s.puntos[0].K - 4320) < 1e-9 && std::fabs(s.puntos[0].vol - 0.22) < 1e-12 &&
+              std::fabs(s.vencimientos[1].F - 4800 * std::exp(0.01)) < 1e-9,
+              "Mercado: superficie JSON con strikes en % y huecos", "");
+}
+
+void test_historico() {
+    // Serie diaria simulada (Philox): GBM y Merton con saltos frecuentes
+    auto serie = [](double s, double lam, double mj, double sj, int n, uint32_t sem) {
+        SerieHistorica h;
+        h.ruta = "simulada";
+        double p = 100, dt = 1.0 / 252, kap = std::exp(mj + 0.5 * sj * sj) - 1;
+        RuidoPhilox<double> rz;
+        h.precios.push_back(p);
+        h.dias.push_back(-1);
+        for (int i = 0; i < n; ++i) {
+            rz.iniciar(sem, (uint64_t)i, 3u);
+            double z = rz.normal(0), u = hd::norm_cdf(rz.normal(1)), zj = rz.normal(2);
+            int k = poisson_inv(lam * dt, u);
+            double r = (0.05 - 0.5 * s * s - lam * kap) * dt + s * std::sqrt(dt) * z + k * mj + std::sqrt((double)k) * sj * zj;
+            p *= std::exp(r);
+            h.precios.push_back(p);
+            h.dias.push_back(-1);
+        }
+        return h;
+    };
+    {
+        ResultadoHistorico r = estimar_historico(serie(0.2, 0, 0, 0, 5000, 7), "auto");
+        double z = (r.bs[1].valor - 0.2) / r.bs[1].error;
+        resultado(std::fabs(z) < 4 && r.modelo.tipo == TipoModelo::BlackScholes && std::fabs(r.hurst_rend - 0.5) < 0.08,
+                  "Histórico: GBM (volatilidad, sin saltos, H ≈ 0.5)",
+                  "vol " + num(r.bs[1].valor) + ", p " + num(r.p_valor) + ", H " + num(r.hurst_rend));
+    }
+    {
+        ResultadoHistorico r = estimar_historico(serie(0.12, 25, -0.03, 0.01, 5000, 9), "auto");
+        bool ok = r.modelo.tipo == TipoModelo::Merton && r.p_valor < 1e-6 && std::fabs(r.merton[1].valor - 0.12) < 0.02 &&
+                  std::fabs(r.merton[2].valor - 25) < 8 && std::fabs(r.merton[3].valor + 0.03) < 0.008;
+        resultado(ok, "Histórico: Merton (detecta y estima los saltos)",
+                  "σ " + num(std::round(r.merton[1].valor * 1e4) / 1e4) + ", λ " + num(std::round(r.merton[2].valor * 100) / 100) +
+                      ", μJ " + num(std::round(r.merton[3].valor * 1e4) / 1e4));
+    }
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -800,6 +1043,10 @@ int main(int argc, char** argv) {
     test_replica_estatica();
     test_vanilla_y_vol_implicita();
     test_cadenas_csv();
+    test_optimizadores();
+    test_mercado_y_paridad();
+    test_calibracion();
+    test_historico();
     test_deterministas();
     test_black_scholes();
     test_modelos();
