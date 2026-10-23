@@ -48,7 +48,9 @@ Cota cota_calibracion(TipoModelo t, const DefParam& d) {
     if (k == "media_salto") return {-1.0, 0.5};
     if (k == "vol_salto") return {0.005, 1.0};
     if (k == "beta") return t == TipoModelo::SABR ? Cota{0.0, 1.0} : Cota{-1.0, 2.5};
-    if (k == "alpha") return {-3.0, 3.0};
+    if (k == "alpha") return t == TipoModelo::FMLS ? Cota{1.05, 2.0} : Cota{-3.0, 3.0};
+    if (k == "hurst") return {0.02, 0.5};
+    if (k == "eta") return {0.05, 5.0};
     if (k == "nu") return {0.001, 5.0};
     if (k == "theta") return {-2.0, 2.0};
     double lo = std::max(d.min, -10.0), hi = std::min(d.max, 10.0);
@@ -278,7 +280,7 @@ json::Valor modelo_a_json(const Modelo& mod) {
     for (size_t i = 0; i < d.params.size(); ++i) {
         const DefParam& p = d.params[i];
         double v = mod.valores[i];
-        if (p.clave == "vol_max" && v == p.defecto) continue;
+        if ((p.clave == "vol_max" || p.clave == "factores") && v == p.defecto) continue;
         if (p.porcentaje) o.poner(p.clave, porcentaje(v, 4));
         else {
             double r = std::round(v * 1e6) / 1e6;
@@ -315,6 +317,9 @@ ResultadoCalibracion calibrar(const DatosMercado& m, const OpcionesCalibracion& 
             case TipoModelo::NIG: base["sigma"] = medio; break;
             case TipoModelo::SABR: base["alpha"] = medio; break;
             case TipoModelo::VolLocal: base["sigma0"] = corto; break;
+            case TipoModelo::RoughHeston: base["vol_inicial"] = corto; base["vol_largo_plazo"] = largo; break;
+            case TipoModelo::RoughBergomi: base["vol_inicial"] = corto; break;
+            case TipoModelo::FMLS: base["volatilidad"] = medio; break;
             default: break;
         }
     }
@@ -334,7 +339,7 @@ ResultadoCalibracion calibrar(const DatosMercado& m, const OpcionesCalibracion& 
         Cota c = cota_calibracion(dm->tipo, d);
         pc.lo = c.lo;
         pc.hi = c.hi;
-        bool fijo = (d.clave == "vol_max") || o.fijos.count(d.clave);
+        bool fijo = (d.clave == "vol_max" || d.clave == "factores") || o.fijos.count(d.clave);
         if (dm->tipo == TipoModelo::SABR && d.clave == "beta" &&
             std::find(o.liberar.begin(), o.liberar.end(), "beta") == o.liberar.end())
             fijo = true;
@@ -578,7 +583,7 @@ void imprimir_calibracion(std::ostream& os, const DatosMercado& m, const Resulta
     } else {
         os << "\n Parámetros" << std::string(16, ' ') << dcha("Valor", 12) << dcha("Error est.", 13) << "   Rango de búsqueda\n";
         for (const auto& p : r.params) {
-            if (p.clave == "vol_max" && !p.libre) continue;
+            if ((p.clave == "vol_max" || p.clave == "factores") && !p.libre) continue;
             auto f = [&](double x) { return p.porcentaje ? porcentaje(x, 3) : fmt(x, 5); };
             os << "   " << col(p.clave, 23) << dcha(f(p.valor), 12)
                << dcha(p.libre ? (p.error >= 0 ? f(p.error) : "-") : "fijo", 13) << "   ";

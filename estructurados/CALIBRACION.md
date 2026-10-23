@@ -73,11 +73,12 @@ Cada evaluación valora toda la superficie con el mismo servicio de precios que 
 |---|---|
 | `black_scholes` | fórmula de Black |
 | `merton` | serie de Poisson de precios de Black |
-| `heston`, `bates`, `nig` | Fourier (fórmula de Lewis) con la función característica del modelo evaluada **una sola vez por vencimiento** y reutilizada en todos los strikes, con Black-Scholes como variable de control (precisión en las alas) |
+| `heston`, `bates`, `nig`, `fmls` | Fourier (fórmula de Lewis) con la función característica del modelo evaluada **una sola vez por vencimiento** y reutilizada en todos los strikes, con Black-Scholes como variable de control (precisión en las alas) |
+| `rough_heston` | Fourier con la función característica de la **ecuación de Riccati fraccionaria** (regla trapezoidal fraccionaria implícita, ver [FRACCIONAL.md](FRACCIONAL.md)), evaluada en paralelo: unos 30 ms por superficie |
 | `sabr` | aproximación de Hagan et al. (2002) |
-| `vol_local` y los modelos sin fórmula | Monte Carlo con el paso del motor de estructurados, antitéticas, ajuste del forward y **números aleatorios comunes** (la misma semilla en cada evaluación): el objetivo es suave en los parámetros y LM funciona con pasos de jacobiano mayores. `--trayectorias` fija la precisión |
+| `vol_local`, `rough_bergomi` y los modelos sin fórmula | Monte Carlo con el paso del motor de estructurados, antitéticas, ajuste del forward y **números aleatorios comunes** (la misma semilla en cada evaluación): el objetivo es suave en los parámetros y LM funciona con pasos de jacobiano mayores. `--trayectorias` fija la precisión |
 
-Con la superficie de ejemplo, una calibración de Heston tarda unos segundos; la de volatilidad local por Monte Carlo, del orden de diez.
+Con la superficie de ejemplo, una calibración de Heston tarda unos segundos; la de volatilidad local por Monte Carlo, del orden de diez; la de rough Heston (seis parámetros, Hurst incluido), unos treinta. En los modelos rugosos `hurst` se busca en [0.02, 0.5] y `factores` (solo afecta a la simulación) queda fijo.
 
 ## Resultado
 

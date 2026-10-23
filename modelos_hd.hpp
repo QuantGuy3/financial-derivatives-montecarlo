@@ -18,11 +18,24 @@
 //  nig            Normal Inverse Gaussian (Lévy de saltos puros): browniano    //
 //                 con deriva θ y vol σ subordinado por un proceso IG de media  //
 //                 t y varianza κt (parametrización de Cont-Tankov); exacto     //
+//  rough_bergomi  V_t = ξ0·exp(ηY_t - ½η²t^{2H}), Y_t = √(2H)∫(t-s)^{H-½}dW_s  //
+//                 (Bayer-Friz-Gatheral): paso cercano exacto (esquema híbrido  //
+//                 de Bennedsen-Lunde-Pakkanen) y el resto del núcleo con una   //
+//                 suma de exponenciales (factores markovianos)                 //
+//  rough_heston   V_t = V0 + ∫K(t-s)κ(θ-V_s)ds + ∫K(t-s)ξ√V_s dW_s,            //
+//                 K(t) = t^{H-½}/Γ(H+½) (El Euch-Rosenbaum): se simula la      //
+//                 varianza forward media de cada paso con el esquema QE de     //
+//                 Andersen (positiva, dos momentos exactos), el núcleo con     //
+//                 factores markovianos y corrección de martingala exacta       //
+//  fmls           log-estable de momentos finitos (Carr-Wu): incrementos       //
+//                 α-estables con β = -1 por Chambers-Mallows-Stuck; exacto     //
 //                                                                              //
 // Ruido por paso: cada activo consume 1 normal "principal" (la que se         //
 // correlaciona entre activos vía Cholesky) y n_extra normales propias:        //
 //   Heston: z_v | Merton: z_N (nº de saltos), z_J (tamaño) | Bates: z_v, z_N,  //
-//   z_J | SABR: z_α | NIG: z_IG, z_U (muestreo IG de Michael-Schucany-Haas).    //
+//   z_J | SABR: z_α | NIG: z_IG, z_U (muestreo IG de Michael-Schucany-Haas) |   //
+//   rough Bergomi: z_v, z_N (parte propia del paso cercano) | rough Heston: z_v //
+//   | FMLS: z_W (la exponencial de CMS; el ángulo sale de la principal).        //
 // Las normales que se usan como uniformes (z_N, z_U) se transforman con Φ(z),  //
 // de modo que todo el ruido sigue siendo normal y compatible con QMC.         //
 // ---------------------------------------------------------------------------- //
@@ -37,8 +50,16 @@ enum class TipoModelo : int {
     VolLocal     = 4,
     SABR         = 5,
     NIG          = 6,
+    RoughBergomi = 7,
+    RoughHeston  = 8,
+    FMLS         = 9,
 };
-inline constexpr int N_TIPOS_MODELO = 7;
+inline constexpr int N_TIPOS_MODELO = 10;
+
+// Modelos rugosos: factores markovianos del núcleo fraccionario (estado por
+// trayectoria) y subyacentes rugosos por producto
+inline constexpr int MAX_FAC_HD = 33;
+inline constexpr int MAX_RUGOSOS_HD = 4;
 
 // Constante de Broadie-Glasserman-Kou para la corrección de continuidad
 inline constexpr double BGK_BETA_HD = 0.5826;
@@ -50,14 +71,22 @@ HD_INLINE int ruidos_extra(TipoModelo t) {
         case TipoModelo::Bates:  return 3;
         case TipoModelo::SABR:   return 1;
         case TipoModelo::NIG:    return 2;
+        case TipoModelo::RoughBergomi: return 2;
+        case TipoModelo::RoughHeston:  return 1;
+        case TipoModelo::FMLS:   return 1;
         default:                 return 0;
     }
+}
+
+HD_INLINE bool modelo_rugoso(TipoModelo t) {
+    return t == TipoModelo::RoughBergomi || t == TipoModelo::RoughHeston;
 }
 
 // Modelos cuyo paso es exacto en distribución (sin error de discretización si
 // solo se observan fechas discretas): pueden simularse solo en las fechas clave.
 HD_INLINE bool modelo_exacto(TipoModelo t) {
-    return t == TipoModelo::BlackScholes || t == TipoModelo::Merton || t == TipoModelo::NIG;
+    return t == TipoModelo::BlackScholes || t == TipoModelo::Merton || t == TipoModelo::NIG ||
+           t == TipoModelo::FMLS;
 }
 
 // Parámetros de un subyacente, ya preparados para la simulación (POD, se sube
@@ -80,6 +109,15 @@ struct ParamsActivo {
     Real nu;                            // SABR: vol de la vol
     Real theta_nig, kappa_nig, omega_nig; // NIG: θ, κ y corrección de martingala ω
     Real vol_max;                       // tope de la vol instantánea (vol local / SABR)
+    // Modelos rugosos (rough Heston usa además v0, theta, kappa, xi, rho y rho_c)
+    int  n_fac;                         // factores markovianos del núcleo (0 si no es rugoso)
+    int  tab;                           // inicio de su tabla por pasos en tab_frac (-1 si no tiene)
+    int  tab_paso;                      // longitud del registro de cada paso: 3·n_fac + 3
+    int  ranura;                        // índice de su estado de factores (-1 si no es rugoso)
+    Real eta, xi0;                      // rough Bergomi: η y ξ0
+    Real v_ini;                         // varianza inicial del estado auxiliar
+    // FMLS: α, 1/α, constantes de Chambers-Mallows-Stuck con β = -1, escala y deriva
+    Real alpha_st, inv_alpha_st, cms_b, cms_s, escala_st, mu_st;
 };
 
 // ---------------------------------------------------------- //
@@ -151,6 +189,8 @@ HD_INLINE Real estado_aux_inicial(const ParamsActivo<Real>& a) {
         case TipoModelo::Heston:
         case TipoModelo::Bates: return a.v0;
         case TipoModelo::SABR:  return a.sigma;
+        case TipoModelo::RoughBergomi:
+        case TipoModelo::RoughHeston: return a.v_ini;
         default:                return Real(0);
     }
 }
@@ -160,7 +200,9 @@ template<typename Real>
 HD_INLINE Real vol_instantanea(const ParamsActivo<Real>& a, Real x, Real v, Real t, Real rcum_t) {
     switch ((TipoModelo)a.tipo) {
         case TipoModelo::Heston:
-        case TipoModelo::Bates:    return hd::sqrt_(hd::max_(v, Real(0)));
+        case TipoModelo::Bates:
+        case TipoModelo::RoughBergomi:
+        case TipoModelo::RoughHeston: return hd::sqrt_(hd::max_(v, Real(0)));
         case TipoModelo::VolLocal: return vol_local_param(a, x, t);
         case TipoModelo::SABR:     return vol_sabr(a, v, x, rcum_t - a.q * t);
         default:                   return a.sigma; // BS, Merton (difusión), NIG (aprox.)
@@ -173,11 +215,14 @@ HD_INLINE Real vol_instantanea(const ParamsActivo<Real>& a, Real x, Real v, Real
 //   rcum_t = ∫_0^t r(s) ds                                                    //
 //   w      = normal principal (ya correlacionada con el resto de activos)    //
 //   e0..e2 = normales extra propias del activo                                //
+//   u      = factores markovianos del activo (modelos rugosos) o nullptr      //
+//   tab    = registro de este paso en la tabla del activo (rugosos) o nullptr //
 // ------------------------------------------------------------------------- //
 template<typename Real>
 HD_INLINE void paso_modelo(const ParamsActivo<Real>& a, Real& x, Real& v,
                            Real t, Real dt, Real sqdt, Real rdt, Real rcum_t,
-                           Real w, Real e0, Real e1, Real e2) {
+                           Real w, Real e0, Real e1, Real e2,
+                           Real* u = nullptr, const Real* tab = nullptr) {
     const Real arrastre = rdt - a.q * dt; // ∫(r - q) en el paso
     switch ((TipoModelo)a.tipo) {
     case TipoModelo::BlackScholes: {
@@ -213,6 +258,82 @@ HD_INLINE void paso_modelo(const ParamsActivo<Real>& a, Real& x, Real& v,
     case TipoModelo::NIG: {
         Real G = ig_incremento(dt, a.kappa_nig, e0, e1);
         x += arrastre + a.omega_nig * dt + a.theta_nig * G + a.sigma * hd::sqrt_(G) * w;
+    } break;
+    case TipoModelo::RoughBergomi: {
+        // Registro: a_j·e^{-x_jΔ} | e^{-x_jΔ} | (1-e^{-x_jΔ})/(x_jΔ) | β, γ, ln ξ0 - ½η²t_{k+1}^{2H}
+        const int nf = a.n_fac;
+        const Real* ae = tab;
+        const Real* e = tab + nf;
+        const Real* wj = tab + 2 * nf;
+        const Real beta = tab[3 * nf], gam = tab[3 * nf + 1], ct = tab[3 * nf + 2];
+        const Real vp = hd::max_(v, Real(0)), sv = hd::sqrt_(vp);
+        x += arrastre - Real(0.5) * vp * dt + sv * sqdt * w;   // varianza al inicio del paso
+        const Real dW = sqdt * (a.rho * w + a.rho_c * e0);
+        Real Y = beta * dW + gam * e1;                         // tramo cercano exacto
+        for (int j = 0; j < nf; ++j) {                         // resto del núcleo
+            Y += ae[j] * u[j];
+            u[j] = e[j] * u[j] + wj[j] * dW;
+        }
+        v = hd::exp_(a.eta * Y + ct);
+    } break;
+    case TipoModelo::RoughHeston: {
+        // v = varianza forward media del paso (≥ 0). Registro:
+        //   e^{-x_jΔ} | (1-e^{-x_jΔ})/(x_jΔ) | c_j·w_j(Δ') | kd', A1', A0
+        // (Δ' es el paso siguiente: la QE sortea directamente su varianza media)
+        const int nf = a.n_fac;
+        const Real* e = tab;
+        const Real* wj = tab + nf;
+        const Real* cw = tab + 2 * nf;
+        const Real kd = tab[3 * nf], A1 = tab[3 * nf + 1], A0 = tab[3 * nf + 2];
+        const Real vb = hd::max_(v, Real(0)), sv = hd::sqrt_(vb);
+        const Real der = a.kappa * (a.theta - vb);
+        // Media y desviación condicionadas de la varianza media del paso siguiente
+        Real m = a.v0 + der * kd + A1 * der * dt;
+        for (int j = 0; j < nf; ++j) m += cw[j] * e[j] * u[j];
+        m = hd::max_(m, Real(1e-12));
+        const Real s = A1 * a.xi * sv * sqdt;
+        const Real G = a.rho * w + a.rho_c * e0;              // normal de la varianza
+        // Exponente de la corrección de martingala: E[exp(tt·Z)]
+        const Real tt = a.rho * sv * sqdt * (Real(1) - Real(0.5) * a.rho * a.xi * A0 * dt);
+        const Real psi = (s * s) / (m * m);
+        Real xn, Z, lnM;
+        if (!(psi > Real(1e-8))) {
+            xn = m; Z = Real(0); lnM = Real(0);
+        } else if (psi <= Real(1.5)) {                        // QE: rama cuadrática
+            const Real ip = Real(2) / psi;
+            const Real b2 = ip - Real(1) + hd::sqrt_(ip) * hd::sqrt_(ip - Real(1));
+            const Real aq = m / (Real(1) + b2), b = hd::sqrt_(b2);
+            xn = aq * (b + G) * (b + G);
+            Z = (xn - m) / s;
+            const Real tau = tt * aq / s;
+            lnM = -tt * m / s + tau * b2 / (Real(1) - Real(2) * tau) - Real(0.5) * hd::log_(Real(1) - Real(2) * tau);
+        } else {                                              // QE: rama exponencial
+            const Real p = (psi - Real(1)) / (psi + Real(1)), be = (Real(1) - p) / m;
+            const Real uc = hd::norm_cdf(-G);                 // 1 - U
+            xn = (Real(1) - uc <= p) ? Real(0) : hd::log_((Real(1) - p) / uc) / be;
+            Z = (xn - m) / s;
+            lnM = -tt * m / s + hd::log_(p + (Real(1) - p) * be / (be - tt / s));
+        }
+        // Varianza integrada del paso, con su respuesta al ruido del propio paso
+        const Real I = hd::max_(dt * (vb + a.xi * A0 * sqdt * sv * Z), Real(0));
+        const Real eperp = a.rho_c * w - a.rho * e0;          // independiente de G
+        x += arrastre - Real(0.5) * I + a.rho * sv * sqdt * Z + a.rho_c * hd::sqrt_(I) * eperp +
+             Real(0.5) * a.rho * a.rho * vb * dt - lnM;
+        const Real dM = der * dt + a.xi * sv * sqdt * Z;
+        for (int j = 0; j < nf; ++j) u[j] = e[j] * u[j] + wj[j] * dM;
+        v = xn;
+    } break;
+    case TipoModelo::FMLS: {
+        // Chambers-Mallows-Stuck con β = -1: ángulo de la normal principal (cópula
+        // gaussiana entre subyacentes; X es creciente en el ángulo) y W ~ Exp(1)
+        const Real lim = Real(1.5707960);                     // π/2 - 3e-7
+        const Real V = hd::clamp_(Real(3.14159265358979) * (hd::norm_cdf(w) - Real(0.5)), -lim, lim);
+        const Real W = -hd::log_(hd::max_(hd::norm_cdf(-e0), Real(1e-30)));
+        const Real al = a.alpha_st, ab = al * (V + a.cms_b);
+        const Real c2 = hd::max_(hd::cos_(V - ab), Real(0));
+        const Real X = a.cms_s * hd::sin_(ab) / hd::pow_(hd::cos_(V), a.inv_alpha_st) *
+                       hd::pow_(c2 / hd::max_(W, Real(1e-30)), (Real(1) - al) * a.inv_alpha_st);
+        x += arrastre + a.mu_st * dt + a.escala_st * hd::pow_(dt, a.inv_alpha_st) * X;
     } break;
     }
 }

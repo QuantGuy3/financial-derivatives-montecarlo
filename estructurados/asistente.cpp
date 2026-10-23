@@ -190,7 +190,7 @@ json::Valor preguntar_modelo(Dialogo& d, const std::string& vol_def) {
     json::Valor m = json::Valor::objeto();
     m.poner("tipo", def.clave);
     for (const auto& p : def.params) {
-        if (p.clave == "vol_max") continue; // parámetro técnico: se deja su valor por defecto
+        if (p.clave == "vol_max" || p.clave == "factores") continue; // parámetros técnicos: valor por defecto
         double dv = p.defecto;
         bool es_vol = (p.clave == "volatilidad" || p.clave == "vol_inicial" || p.clave == "sigma0" ||
                        (def.tipo == TipoModelo::SABR && p.clave == "alpha") ||

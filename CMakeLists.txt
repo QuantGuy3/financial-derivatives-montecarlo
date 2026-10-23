@@ -60,6 +60,12 @@ set(EST_FUENTES
     estructurados/valoracion.cpp
     estructurados/motor_cpu.cpp
     estructurados/sobol_host.cpp
+    estructurados/fraccional_cli.cpp
+    fraccional/nucleo.cpp
+    fraccional/fbm.cpp
+    fraccional/rugosos.cpp
+    fraccional/fmls.cpp
+    fraccional/subdifusivo.cpp
 )
 if(MC_CON_CUDA)
     list(APPEND EST_FUENTES estructurados/motor_gpu.cu)

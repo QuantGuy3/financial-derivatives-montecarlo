@@ -8,12 +8,13 @@
 //   black_scholes      fórmula cerrada                                         //
 //   merton             serie de Poisson de precios Black-Scholes               //
 //   heston, bates, nig Fourier (Lewis 2001) con la función característica      //
-//                      evaluada una sola vez por vencimiento y Black-Scholes   //
-//                      como variable de control (precisión en las alas)        //
+//   rough_heston, fmls evaluada una sola vez por vencimiento y Black-Scholes   //
+//                      como variable de control (precisión en las alas); la de //
+//                      rough Heston sale de la ecuación de Riccati fraccionaria //
 //   sabr               fórmula de Hagan et al. (2002) (aproximación)           //
-//   vol_local y cualquier otro: Monte Carlo con el mismo paso de modelo que el //
-//                      motor de estructurados (números aleatorios comunes,     //
-//                      antitéticas y ajuste del forward)                       //
+//   vol_local, rough_bergomi y cualquier otro: Monte Carlo con el mismo paso   //
+//                      de modelo que el motor de estructurados (números        //
+//                      aleatorios comunes, antitéticas y ajuste del forward)   //
 // Los tipos de la curva se tratan como deterministas: r_ef(T) = ∫_0^T r / T.   //
 // ---------------------------------------------------------------------------- //
 
@@ -40,8 +41,11 @@ struct OpcionesMCVanilla {
 class IntegralLewis {
 public:
     using FuncCar = std::function<std::complex<double>(std::complex<double>)>;
-    // φ es la función característica de X_T = ln(S_T/S_0) - (r-q)·T (φ(-i) = 1)
-    IntegralLewis(const FuncCar& phi, double T);
+    // φ es la función característica de X_T = ln(S_T/S_0) - (r-q)·T (φ(-i) = 1).
+    // nodos_tramo: nodos de Gauss-Legendre por tramo de anchura 4 (32 o 16); tol: la
+    // integral se corta cuando (|φ| + |φ_BS|)/(u² + 1/4) < tol en dos tramos seguidos.
+    // Si φ es cara (más de unos microsegundos), los nodos se evalúan en paralelo.
+    IntegralLewis(const FuncCar& phi, double T, int nodos_tramo = 32, double tol = 1e-16);
     double sigma_ref() const { return sigma_ref_; }
     // Precio de la call y de la digital (paga 1 si S_T ≥ K)
     double call(double S, double K, double r, double q) const;
@@ -82,6 +86,9 @@ public:
     double put_fwd(double T, double K, double F, double DF);
     std::string metodo() const;
     bool es_mc() const { return metodo_ == Metodo::MC; }
+    // Error estándar aproximado de call/put por Monte Carlo (sin tener en cuenta las
+    // antitéticas, así que es conservador); -1 si el método no es Monte Carlo
+    double error_mc(double T, double K, bool call);
 
 private:
     enum class Metodo { BS, MERTON, FOURIER, HAGAN, MC };

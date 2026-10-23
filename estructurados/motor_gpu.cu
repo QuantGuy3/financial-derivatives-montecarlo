@@ -139,6 +139,7 @@ public:
         vista.ac_imp = subir(h.ac_imp);
         vista.bloques = subir(h.bloques);
         vista.formulas = subir(h.formulas);
+        vista.tab_frac = subir(h.tab_frac);
     }
     ~PlanDispositivo() {
         for (void* p : buffers_) cudaFree(p);

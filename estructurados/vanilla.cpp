@@ -1,8 +1,10 @@
 #include "vanilla.hpp"
 #include "plan.hpp"
 #include "referencias.hpp"
+#include "../fraccional/fraccional.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <numeric>
 #include <stdexcept>
@@ -53,38 +55,95 @@ const GL32& gl32() {
 // Integral de Lewis con control Black-Scholes                            //
 // ===================================================================== //
 
-IntegralLewis::IntegralLewis(const FuncCar& phi, double T) : T_(T) {
+IntegralLewis::IntegralLewis(const FuncCar& phi, double T, int nodos_tramo, double tol) : T_(T) {
     // Volatilidad de referencia: varianza de X_T por diferencias en u = 0,
     // c2 = -d²/du² ln φ(0)
+    const auto t0 = std::chrono::steady_clock::now();
     const double h = 1e-3;
     double c2 = -(std::log(phi(cd(h, 0.0))) + std::log(phi(cd(-h, 0.0)))).real() / (h * h);
+    const double coste = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() / 2.0;
     if (!std::isfinite(c2) || c2 <= 1e-12) c2 = 0.04 * T;
     sigma_ref_ = std::sqrt(c2 / T);
     const double s2T = sigma_ref_ * sigma_ref_ * T;
     auto phi_bs = [s2T](cd u) { return std::exp(-0.5 * s2T * (cd(0.0, 1.0) * u + u * u)); };
 
-    // Tramos de anchura 4 con Gauss-Legendre de 32 nodos hasta que la envolvente
-    // |φ| + |φ_BS| sobre (u² + 1/4) sea despreciable
-    const GL32& g = gl32();
-    const double ancho = 4.0, umax = 2.0e4;
+    // Tramos de anchura 4 hasta que la envolvente |φ| + |φ_BS| sobre (u² + 1/4) sea
+    // despreciable (se mira el extremo de cada tramo). Con 16 nodos por tramo (φ cara),
+    // a partir de u = 40 los tramos miden 8: el integrando ya es una cola suave.
+    const double umax = 2.0e4;
+    std::vector<double> ini;   // inicio de cada tramo
+    std::vector<double> anc;   // anchura de cada tramo
     int pequenos = 0;
-    for (double a = 0.0; a < umax; a += ancho) {
-        const double c = a + 0.5 * ancho, r = 0.5 * ancho;
-        for (int i = 0; i < 32; ++i) {
-            double u = c + r * g.x[i];
-            cd z(u, -0.5);
-            cd dif = phi(z) - phi_bs(z);
-            cd peso = dif * (r * g.w[i] / (u * u + 0.25));
-            u_.push_back(u);
-            cr_.push_back(peso.real());
-            ci_.push_back(peso.imag());
-        }
+    for (double a = 0.0; a < umax;) {
+        const double ancho = (nodos_tramo == 16 && a >= 40.0) ? 8.0 : 4.0;
+        ini.push_back(a);
+        anc.push_back(ancho);
         const double b = a + ancho;
+        a = b;
         cd zb(b, -0.5);
         double env = (std::abs(phi(zb)) + std::abs(phi_bs(zb))) / (b * b + 0.25);
         if (!std::isfinite(env)) throw std::runtime_error("función característica no finita en u = " + std::to_string(b));
-        pequenos = (env < 1e-16) ? pequenos + 1 : 0;
+        pequenos = (env < tol) ? pequenos + 1 : 0;
         if (pequenos >= 2) break;
+    }
+    const size_t tramos = ini.size();
+    // Nodos de Gauss-Legendre de cada tramo
+    std::vector<double> gx, gw;
+    if (nodos_tramo == 16) {
+        static const std::vector<double> x16 = [] {
+            std::vector<double> x(16);
+            for (int i = 0; i < 16; ++i) {
+                double z = std::cos(PI * (i + 0.75) / 16.5);
+                for (int it = 0; it < 100; ++it) {
+                    double p0 = 1.0, p1 = 0.0;
+                    for (int j = 1; j <= 16; ++j) { double p2 = p1; p1 = p0; p0 = ((2.0 * j - 1.0) * z * p1 - (j - 1.0) * p2) / j; }
+                    const double dp = 16 * (z * p0 - p1) / (z * z - 1.0), z1 = z;
+                    z = z1 - p0 / dp;
+                    if (std::fabs(z - z1) < 1e-15) break;
+                }
+                x[(size_t)i] = z;
+            }
+            return x;
+        }();
+        gx = x16;
+        for (double z : gx) {
+            double p0 = 1.0, p1 = 0.0;
+            for (int j = 1; j <= 16; ++j) { double p2 = p1; p1 = p0; p0 = ((2.0 * j - 1.0) * z * p1 - (j - 1.0) * p2) / j; }
+            const double dp = 16 * (z * p0 - p1) / (z * z - 1.0);
+            gw.push_back(2.0 / ((1.0 - z * z) * dp * dp));
+        }
+    } else {
+        const GL32& g = gl32();
+        gx.assign(g.x, g.x + 32);
+        gw.assign(g.w, g.w + 32);
+    }
+    const size_t m = gx.size(), n = tramos * m;
+    u_.resize(n);
+    cr_.resize(n);
+    ci_.resize(n);
+    auto nodo = [&](size_t k) {
+        const size_t t = k / m, i = k % m;
+        const double c = ini[t] + 0.5 * anc[t], r = 0.5 * anc[t];
+        const double u = c + r * gx[i];
+        const cd z(u, -0.5);
+        const cd peso = (phi(z) - phi_bs(z)) * (r * gw[i] / (u * u + 0.25));
+        u_[k] = u;
+        cr_[k] = peso.real();
+        ci_[k] = peso.imag();
+    };
+    // Con una φ cara (p. ej. la de rough Heston, que integra una ecuación de Riccati
+    // fraccionaria en cada u) los nodos se reparten entre hilos
+    const unsigned hw = std::max(1u, std::thread::hardware_concurrency());
+    const int nh = (coste * (double)n > 2e-3 && hw > 1) ? (int)std::min<size_t>(hw, n / 16 + 1) : 1;
+    if (nh <= 1) {
+        for (size_t k = 0; k < n; ++k) nodo(k);
+    } else {
+        std::vector<std::thread> th;
+        for (int t = 0; t < nh; ++t)
+            th.emplace_back([&, t] {
+                for (size_t k = (size_t)t; k < n; k += (size_t)nh) nodo(k);
+            });
+        for (auto& x : th) x.join();
     }
 }
 
@@ -146,6 +205,7 @@ struct PreciosVanilla::Muestra {
     double media = 1;        // media de las S simuladas (sin reescalar)
     std::vector<double> S;   // simuladas, ordenadas (sin reescalar)
     std::vector<double> pre; // pre[i] = Σ_{j<i} S[j]
+    std::vector<double> pre2; // pre2[i] = Σ_{j<i} S[j]²
     // E[(c·S - K)⁺] y E[(K - c·S)⁺] con c = F/media (ajuste del forward)
     double call_esp(double K, double Fobj) const {
         const double c = Fobj / media, k = K / c;
@@ -157,6 +217,23 @@ struct PreciosVanilla::Muestra {
         const double c = Fobj / media, k = K / c;
         size_t i = (size_t)(std::upper_bound(S.begin(), S.end(), k) - S.begin());
         return c * (k * (double)i - pre[i]) / (double)S.size();
+    }
+    // Desviación típica del pago (c·S - K)⁺ o (K - c·S)⁺
+    double desv(double K, double Fobj, bool call) const {
+        const double c = Fobj / media, k = K / c;
+        const size_t n = S.size();
+        const size_t i = (size_t)(std::upper_bound(S.begin(), S.end(), k) - S.begin());
+        double m1, m2;
+        if (call) {
+            const double s1 = pre[n] - pre[i], s2 = pre2[n] - pre2[i], cnt = (double)(n - i);
+            m1 = c * (s1 - k * cnt) / n;
+            m2 = c * c * (s2 - 2.0 * k * s1 + k * k * cnt) / n;
+        } else {
+            const double s1 = pre[i], s2 = pre2[i], cnt = (double)i;
+            m1 = c * (k * cnt - s1) / n;
+            m2 = c * c * (k * k * cnt - 2.0 * k * s1 + s2) / n;
+        }
+        return std::sqrt(std::max(m2 - m1 * m1, 0.0));
     }
     double prob_mayor_igual(double K, double Fobj) const {
         const double k = K * media / Fobj;
@@ -172,7 +249,9 @@ PreciosVanilla::PreciosVanilla(const Activo& a, const Curva& c, OpcionesMCVanill
         case TipoModelo::Merton:       metodo_ = Metodo::MERTON; break;
         case TipoModelo::Heston:
         case TipoModelo::Bates:
-        case TipoModelo::NIG:          metodo_ = Metodo::FOURIER; break;
+        case TipoModelo::NIG:
+        case TipoModelo::RoughHeston:
+        case TipoModelo::FMLS:         metodo_ = Metodo::FOURIER; break;
         case TipoModelo::SABR:         metodo_ = Metodo::HAGAN; break;
         default:                       metodo_ = Metodo::MC; break;
     }
@@ -185,7 +264,10 @@ std::string PreciosVanilla::metodo() const {
     switch (metodo_) {
         case Metodo::BS:      return "fórmula cerrada de Black-Scholes";
         case Metodo::MERTON:  return "serie de Merton";
-        case Metodo::FOURIER: return "Fourier (Lewis) con la función característica del modelo";
+        case Metodo::FOURIER:
+            return act_.modelo.tipo == TipoModelo::RoughHeston
+                       ? "Fourier (Lewis) con la función característica por la ecuación de Riccati fraccionaria"
+                       : "Fourier (Lewis) con la función característica del modelo";
         case Metodo::HAGAN:   return "fórmula de Hagan (aproximación SABR)";
         default:
             return "Monte Carlo (" + std::to_string(mc_.trayectorias) + " trayectorias con antitéticas, " +
@@ -216,6 +298,23 @@ IntegralLewis::FuncCar PreciosVanilla::func_car(double T) const {
                                  m["vol_salto"], T);
         }
         case TipoModelo::NIG: return ref::fc_nig(m["sigma"], m["theta"], m["kappa"], T);
+        case TipoModelo::RoughHeston: {
+            frac::RoughHeston p;
+            p.H = m["hurst"];
+            p.V0 = std::pow(m["vol_inicial"], 2.0);
+            p.theta = std::pow(m["vol_largo_plazo"], 2.0);
+            p.kappa = m["kappa"];
+            p.xi = m["xi"];
+            p.rho = m["rho"];
+            const int N = T <= 1.0 ? 128 : 192;
+            return [p, T, N](std::complex<double> u) { return frac::fc_rough_heston(p, u, T, N); };
+        }
+        case TipoModelo::FMLS: {
+            frac::FMLS p;
+            p.alpha = m["alpha"];
+            p.sigma = m["volatilidad"];
+            return [p, T](std::complex<double> u) { return frac::fc_fmls(p, u, T); };
+        }
         default: throw std::runtime_error("el modelo " + def_modelo(m.tipo).nombre + " no tiene función característica");
     }
 }
@@ -223,7 +322,10 @@ IntegralLewis::FuncCar PreciosVanilla::func_car(double T) const {
 const IntegralLewis& PreciosVanilla::lewis(double T) {
     auto it = lewis_.find(T);
     if (it != lewis_.end()) return *it->second;
-    auto p = std::make_unique<IntegralLewis>(func_car(T), T);
+    // La función característica de rough Heston es cara: Gauss-Legendre de 16 nodos por tramo
+    // (sobra para un integrando tan suave) y corte de la cola algo menos estricto
+    const bool cara = act_.modelo.tipo == TipoModelo::RoughHeston;
+    auto p = std::make_unique<IntegralLewis>(func_car(T), T, cara ? 16 : 32, cara ? 1e-14 : 1e-16);
     const IntegralLewis& ref = *p;
     lewis_.emplace(T, std::move(p));
     return ref;
@@ -250,7 +352,7 @@ void PreciosVanilla::simular(const std::vector<double>& Ts_in) {
     std::vector<double> Ts = Ts_in;
     std::sort(Ts.begin(), Ts.end());
     Ts.erase(std::unique(Ts.begin(), Ts.end()), Ts.end());
-    const ParamsActivo<double> pa = preparar_activo<double>(act_);
+    ParamsActivo<double> pa = preparar_activo<double>(act_);
     const bool exacto = modelo_exacto(act_.modelo.tipo);
 
     // Rejilla: los vencimientos son nodos; entre ellos, pasos de 1/pasos_por_anio
@@ -273,6 +375,11 @@ void PreciosVanilla::simular(const std::vector<double>& Ts_in) {
     }
     const int npasos = (int)dt.size();
     const uint32_t dim_paso = 1u + (uint32_t)pa.n_extra;
+    std::vector<double> tabla; // modelos rugosos: tabla por pasos del núcleo
+    if (modelo_rugoso(act_.modelo.tipo)) {
+        preparar_rugoso(pa, act_.modelo, dt, tabla);
+        pa.ranura = 0;
+    }
     const long long npares = std::max(1LL, mc_.trayectorias / 2);
     const long long n = 2 * npares;
     std::vector<std::vector<double>> S(Ts.size(), std::vector<double>((size_t)n));
@@ -288,6 +395,8 @@ void PreciosVanilla::simular(const std::vector<double>& Ts_in) {
                 RuidoPhilox<double> rz;
                 rz.iniciar(mc_.semilla, (uint64_t)par, 7u);
                 double x = pa.x0, v = estado_aux_inicial(pa);
+                double u[MAX_FAC_HD];
+                for (int j = 0; j < pa.n_fac; ++j) u[j] = 0.0;
                 for (int k = 0; k < npasos; ++k) {
                     const uint32_t base = (uint32_t)k * dim_paso;
                     double w = sg * rz.normal(base);
@@ -295,8 +404,9 @@ void PreciosVanilla::simular(const std::vector<double>& Ts_in) {
                     if (pa.n_extra > 0) e0 = sg * rz.normal(base + 1u);
                     if (pa.n_extra > 1) e1 = sg * rz.normal(base + 2u);
                     if (pa.n_extra > 2) e2 = sg * rz.normal(base + 3u);
+                    const double* tb = pa.tab >= 0 ? tabla.data() + pa.tab + (size_t)k * (size_t)pa.tab_paso : nullptr;
                     paso_modelo(pa, x, v, t_ini[(size_t)k], dt[(size_t)k], sqdt[(size_t)k], rdt[(size_t)k],
-                                rcum[(size_t)k], w, e0, e1, e2);
+                                rcum[(size_t)k], w, e0, e1, e2, pa.n_fac > 0 ? u : nullptr, tb);
                     if (marca[(size_t)k] >= 0)
                         S[(size_t)marca[(size_t)k]][(size_t)(2 * par + sgn)] = act_.nivel_inicial * std::exp(x);
                 }
@@ -321,7 +431,11 @@ void PreciosVanilla::simular(const std::vector<double>& Ts_in) {
         mu->S = std::move(S[j]);
         std::sort(mu->S.begin(), mu->S.end());
         mu->pre.assign(mu->S.size() + 1, 0.0);
-        for (size_t i = 0; i < mu->S.size(); ++i) mu->pre[i + 1] = mu->pre[i] + mu->S[i];
+        mu->pre2.assign(mu->S.size() + 1, 0.0);
+        for (size_t i = 0; i < mu->S.size(); ++i) {
+            mu->pre[i + 1] = mu->pre[i] + mu->S[i];
+            mu->pre2[i + 1] = mu->pre2[i] + mu->S[i] * mu->S[i];
+        }
         muestras_[Ts[j]] = std::move(mu);
     }
 }
@@ -398,6 +512,12 @@ double PreciosVanilla::put_fwd(double T, double K, double F, double DF) {
             return ref::sabr_precio(false, S0_, K, T, r, q, m["alpha"], m["beta"], m["rho"], m["nu"]);
         }
     }
+}
+
+double PreciosVanilla::error_mc(double T, double K, bool es_call) {
+    if (metodo_ != Metodo::MC || T <= 0) return -1.0;
+    const Muestra& mu = muestra(T);
+    return mu.DF * mu.desv(K, mu.F, es_call) / std::sqrt((double)mu.S.size());
 }
 
 double PreciosVanilla::digital(double T, double K, bool es_call) {

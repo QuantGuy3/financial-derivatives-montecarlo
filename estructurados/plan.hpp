@@ -12,7 +12,9 @@
 // ---------------------------------------------------------------------------- //
 
 #include "producto.hpp"
+#include "../fraccional/fraccional.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <memory>
 #include <vector>
@@ -31,6 +33,7 @@ struct PlanSim {
     std::vector<Real> ac_bar, ac_imp;
     std::vector<BloqueSim<Real>> bloques;
     std::vector<InstrFormula<Real>> formulas;
+    std::vector<Real> tab_frac;
     SimProducto<Real> vista{};
     double pasos_por_anio = 0.0;
 
@@ -61,6 +64,7 @@ struct PlanSim {
         vista.ac_imp = ac_imp.empty() ? nullptr : ac_imp.data();
         vista.bloques = bloques.empty() ? nullptr : bloques.data();
         vista.formulas = formulas.empty() ? nullptr : formulas.data();
+        vista.tab_frac = tab_frac.empty() ? nullptr : tab_frac.data();
     }
 };
 
@@ -82,6 +86,10 @@ ParamsActivo<Real> preparar_activo(const Activo& a) {
     pa.q = (Real)a.dividendos;
     pa.rho_c = Real(1);
     pa.vol_max = Real(3);
+    pa.n_fac = 0;
+    pa.tab = -1;
+    pa.tab_paso = 0;
+    pa.ranura = -1;
     auto saltos = [&]() {
         double lam = m["lambda"], mj = m["media_salto"], sj = m["vol_salto"];
         pa.lambda = (Real)lam;
@@ -136,8 +144,94 @@ ParamsActivo<Real> preparar_activo(const Activo& a) {
         // ω = -ψ(-i): E[exp(θG + σ√G Z)] = exp((t/κ)(1 - √(1 - σ²κ - 2θκ)))
         pa.omega_nig = (Real)(-(1.0 - std::sqrt(1.0 - s * s * k - 2.0 * th * k)) / k);
     } break;
+    case TipoModelo::RoughBergomi: {
+        const double vi = m["vol_inicial"], r = m["rho"];
+        pa.xi0 = (Real)(vi * vi);
+        pa.v_ini = pa.xi0;
+        pa.eta = (Real)m["eta"];
+        pa.rho = (Real)r;
+        pa.rho_c = (Real)std::sqrt(std::max(0.0, 1.0 - r * r));
+    } break;
+    case TipoModelo::RoughHeston:
+        heston();             // v0, θ, κ, ξ, ρ (la tabla por pasos fija v_ini)
+        pa.v_ini = pa.v0;
+        break;
+    case TipoModelo::FMLS: {
+        const double al = m["alpha"], sg = m["volatilidad"], PI = 3.14159265358979323846;
+        const double esc = sg / std::sqrt(2.0), ta = std::tan(PI * al / 2.0);
+        pa.sigma = (Real)sg;
+        pa.alpha_st = (Real)al;
+        pa.inv_alpha_st = (Real)(1.0 / al);
+        pa.cms_b = (Real)(std::atan(-ta) / al);
+        pa.cms_s = (Real)std::pow(1.0 + ta * ta, 1.0 / (2.0 * al));
+        pa.escala_st = (Real)esc;
+        pa.mu_st = (Real)(std::pow(esc, al) / std::cos(PI * al / 2.0));
+    } break;
     }
     return pa;
+}
+
+// --------------------------------------------------------------------------- //
+// Tabla por pasos de un subyacente rugoso para la rejilla dt[0..n-1] (que     //
+// empieza en t = 0). El núcleo se aproxima con frac::nodos_nucleo en          //
+// [min dt, Σ dt]; cada paso guarda 3·n_fac + 3 valores (ver paso_modelo).      //
+// Fija n_fac, tab, tab_paso y v_ini.                                          //
+// --------------------------------------------------------------------------- //
+template<typename Real>
+void preparar_rugoso(ParamsActivo<Real>& pa, const Modelo& m, const std::vector<double>& dt, std::vector<Real>& tabla) {
+    const double H = m["hurst"];
+    const int fac = std::max(3, (int)std::lround(m["factores"]));
+    double T = 0.0, dtmin = 1e300;
+    for (double d : dt) {
+        T += d;
+        dtmin = std::min(dtmin, d);
+    }
+    const frac::NodosNucleo nn = frac::nodos_nucleo(H, fac, dtmin, T);
+    const int nf = (int)nn.x.size();
+    pa.n_fac = nf;
+    pa.tab_paso = 3 * nf + 3;
+    pa.tab = (int)tabla.size();
+    const double a = H + 0.5;
+    const size_t n = dt.size();
+    auto wf = [](double x, double d) { // (1 - e^{-xd})/(xd)
+        const double z = x * d;
+        return z < 1e-12 ? 1.0 - 0.5 * z : -std::expm1(-z) / z;
+    };
+    tabla.reserve(tabla.size() + n * (size_t)pa.tab_paso);
+    if (m.tipo == TipoModelo::RoughBergomi) {
+        const double eta = m["eta"], vi = m["vol_inicial"];
+        const double s2H = std::sqrt(2.0 * H), fa = s2H * std::tgamma(a); // a_j = √(2H)·Γ(α)·c_j
+        const double gfac = std::sqrt(std::max(0.0, 1.0 - 2.0 * H / (a * a)));
+        double t = 0.0;
+        for (size_t k = 0; k < n; ++k) {
+            const double d = dt[k];
+            t += d;
+            for (int j = 0; j < nf; ++j) tabla.push_back((Real)(fa * nn.c[(size_t)j] * std::exp(-nn.x[(size_t)j] * d)));
+            for (int j = 0; j < nf; ++j) tabla.push_back((Real)std::exp(-nn.x[(size_t)j] * d));
+            for (int j = 0; j < nf; ++j) tabla.push_back((Real)wf(nn.x[(size_t)j], d));
+            tabla.push_back((Real)(s2H * std::pow(d, H - 0.5) / a));
+            tabla.push_back((Real)(std::pow(d, H) * gfac));
+            tabla.push_back((Real)(std::log(vi * vi) - 0.5 * eta * eta * std::pow(t, 2.0 * H)));
+        }
+    } else {
+        const double g2 = std::tgamma(a + 2.0);
+        for (size_t k = 0; k < n; ++k) {
+            const double d = dt[k], dn = (k + 1 < n) ? dt[k + 1] : d;
+            double A1 = 0.0;
+            for (int j = 0; j < nf; ++j) tabla.push_back((Real)std::exp(-nn.x[(size_t)j] * d));
+            for (int j = 0; j < nf; ++j) tabla.push_back((Real)wf(nn.x[(size_t)j], d));
+            for (int j = 0; j < nf; ++j) {
+                const double cw = nn.c[(size_t)j] * wf(nn.x[(size_t)j], dn);
+                tabla.push_back((Real)cw);
+                A1 += cw * wf(nn.x[(size_t)j], d);
+            }
+            tabla.push_back((Real)(std::pow(dn, a) / g2));      // kd' = Δ'^α/Γ(α+2)
+            tabla.push_back((Real)A1);                         // A1' = Σ c_j w_j(Δ') w_j(Δ)
+            tabla.push_back((Real)(std::pow(d, a - 1.0) / g2)); // A0 = Δ^{α-1}/Γ(α+2)
+        }
+        const double v0 = std::pow(m["vol_inicial"], 2.0), th = std::pow(m["vol_largo_plazo"], 2.0);
+        pa.v_ini = (Real)(v0 + m["kappa"] * (th - v0) * std::pow(dt.empty() ? 0.0 : dt[0], a) / g2);
+    }
 }
 
 template<typename Real>
@@ -178,6 +272,17 @@ std::unique_ptr<PlanSim<Real>> construir_plan(const Producto& p) {
     }
     const int npasos = (int)nodos.size() - 1;
     v.n_pasos = npasos;
+    // Subyacentes rugosos: tabla por pasos y ranura de estado
+    {
+        std::vector<double> dts((size_t)npasos);
+        for (int k = 0; k < npasos; ++k) dts[(size_t)k] = nodos[(size_t)k + 1] - nodos[(size_t)k];
+        int ranura = 0;
+        for (int i = 0; i < n; ++i) {
+            if (!modelo_rugoso(p.activos[(size_t)i].modelo.tipo)) continue;
+            preparar_rugoso(P.act[(size_t)i], p.activos[(size_t)i].modelo, dts, P.tab_frac);
+            P.act[(size_t)i].ranura = ranura++;
+        }
+    }
     for (int k = 0; k < npasos; ++k) {
         double a = nodos[k], b = nodos[k + 1];
         double Ia = p.curva.integral(a), Ib = p.curva.integral(b);

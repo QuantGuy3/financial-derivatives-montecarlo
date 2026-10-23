@@ -144,6 +144,7 @@ struct SimProducto {
     const Real* rcum_ini;          // ∫_0^{t_ini} r
     const Real* df_fin;            // factor de descuento al final del paso
     const int*  obs_paso;          // índice de la observación que cae al final del paso, o -1
+    const Real* tab_frac;          // tablas por pasos de los subyacentes rugosos (o nullptr)
     int monitor_paso;              // 1 si hay que evaluar la cesta en todos los pasos
     int hay_rango;                 // 1 si alguna pata de cupón es range accrual
 
@@ -311,9 +312,12 @@ template<typename Real, class Ruido, class Registro>
 HD void simular_trayectoria(const SimProducto<Real>& sp, Ruido& rz, Registro& reg, ResTray<Real>& out) {
     const int n = sp.n_act;
     Real x[MAX_ACT_HD], v[MAX_ACT_HD], z[MAX_ACT_HD], p[MAX_ACT_HD];
+    Real uf[MAX_RUGOSOS_HD][MAX_FAC_HD]; // factores markovianos de los subyacentes rugosos
     for (int i = 0; i < n; ++i) {
         x[i] = sp.act[i].x0;
         v[i] = estado_aux_inicial(sp.act[i]);
+        if (sp.act[i].ranura >= 0)
+            for (int j = 0; j < sp.act[i].n_fac; ++j) uf[sp.act[i].ranura][j] = Real(0);
     }
 
     int ki = sp.ki_ini, ko = 0;
@@ -351,7 +355,9 @@ HD void simular_trayectoria(const SimProducto<Real>& sp, Ruido& rz, Registro& re
             if (a.n_extra > 0) e0 = rz.normal(eb);
             if (a.n_extra > 1) e1 = rz.normal(eb + 1u);
             if (a.n_extra > 2) e2 = rz.normal(eb + 2u);
-            paso_modelo(a, x[i], v[i], t0, dt, sq, rd, rc, z[i], e0, e1, e2);
+            Real* u = (a.ranura >= 0) ? uf[a.ranura] : nullptr;
+            const Real* tb = (a.tab >= 0) ? sp.tab_frac + a.tab + (size_t)k * (size_t)a.tab_paso : nullptr;
+            paso_modelo(a, x[i], v[i], t0, dt, sq, rd, rc, z[i], e0, e1, e2, u, tb);
         }
 
         const int j = sp.obs_paso[k];

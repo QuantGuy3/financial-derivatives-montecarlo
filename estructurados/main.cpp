@@ -8,10 +8,12 @@
 //   estructurados replicar <fichero.json> [opciones]  réplica estática con opciones
 //   estructurados calibrar <mercado.json|cadena.csv> --modelo M [opciones]
 //   estructurados historico <precios.csv> [opciones]   estimación con una serie de precios
+//   estructurados fraccional [modelos|precio|sonrisa|fbm|nucleo] ...  modelos fraccionarios
 
 #include "asistente.hpp"
 #include "calibracion.hpp"
 #include "cotizaciones.hpp"
+#include "fraccional_cli.hpp"
 #include "historico.hpp"
 #include "mercado.hpp"
 #include "plantillas.hpp"
@@ -43,7 +45,9 @@ void uso(std::ostream& os) {
           "  estructurados replicar <fichero.json> [opciones]  Réplica estática con bonos, subyacente y opciones\n"
           "  estructurados calibrar <mercado.json|cadena.csv> --modelo M [opciones]   Calibra un modelo a opciones\n"
           "  estructurados historico <precios.csv> [--modelo auto|black_scholes|merton] [--producto ...]\n"
-          "                                              Estima un modelo con la serie histórica de precios\n"
+          "                                              Estima un modelo con la serie histórica de precios\n";
+    uso_fraccional(os);
+    os <<
           "\nOpciones de valoración (prevalecen sobre la sección \"simulacion\" del fichero):\n"
           "  --metodo auto|mc|qmc     --dispositivo auto|gpu|cpu   (--cpu / --gpu)\n"
           "  --error 0.05%            error estándar objetivo, en % del nominal\n"
@@ -65,7 +69,8 @@ void uso(std::ostream& os) {
           "  --csv cartera.csv        guarda la cartera      --perfil perfil.csv   pago objetivo y réplica\n"
           "  --salida replica.json    guarda la réplica en JSON\n"
           "\nOpciones de la calibración (ver estructurados/CALIBRACION.md):\n"
-          "  --modelo M               black_scholes, heston, merton, bates, nig, sabr, vol_local o svi\n"
+          "  --modelo M               black_scholes, heston, merton, bates, nig, sabr, vol_local, rough_heston,\n"
+          "                           rough_bergomi, fmls o svi\n"
           "  --optimizador auto|lm|de|nm   --arranques N   --pesos iguales|vega|horquilla\n"
           "  --fijar k=v,...   --liberar k,...   --inicial k=v,...   (parámetros del modelo)\n"
           "  --vencimientos 1M:3A   --strikes 70%:130% (K/F)   --volumen-min N   --con-dentro-del-dinero\n"
@@ -126,7 +131,7 @@ int cmd_modelos() {
             std::string k = "\"" + p.clave + "\"";
             std::cout << "      " << k << std::string(k.size() < 20 ? 20 - k.size() : 1, ' ') << p.descripcion
                       << " (por defecto " << (p.porcentaje ? porcentaje(p.defecto) : fmt(p.defecto, 4));
-            if (p.clave == "vol_max") std::cout << ", opcional";
+            if (p.clave == "vol_max" || p.clave == "factores") std::cout << ", opcional";
             std::cout << ")\n";
         }
     }
@@ -507,6 +512,7 @@ int main(int argc, char** argv) {
         if (cmd == "replicar" || cmd == "replica") return cmd_replicar(resto);
         if (cmd == "calibrar" || cmd == "calibracion") return cmd_calibrar(resto);
         if (cmd == "historico" || cmd == "histórico") return cmd_historico(resto);
+        if (cmd == "fraccional" || cmd == "fraccionarios") return cmd_fraccional(resto);
         std::cerr << "Orden desconocida: " << cmd << "\n\n";
         uso(std::cerr);
         return 2;

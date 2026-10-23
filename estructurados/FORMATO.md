@@ -90,6 +90,9 @@ Cada subyacente tiene su propio modelo (se pueden mezclar). Todos se simulan baj
 | `vol_local` (`dupire`, `cev`) | `sigma0`, `alpha`, `beta`, `vol_max` | σ(S,t) = σ0·e^(-αt)·(S/S0)^(β-1) | log-Euler |
 | `sabr` | `alpha`, `beta`, `nu`, `rho`, `vol_max` | dF = α F^β dW₁, dα = να dW₂ (sobre el forward) | log-Euler (α exacto) |
 | `nig` | `sigma`, `theta`, `kappa` | browniano con deriva θ y vol σ subordinado por un IG de varianza κ | exacto |
+| `rough_heston` | los de Heston (`kappa` = λ, `xi` = ν) + `hurst`, `factores` | Heston con núcleo fraccionario t^{H-½}/Γ(H+½) | varianza forward por QE + factores markovianos |
+| `rough_bergomi` (`rbergomi`) | `vol_inicial` (√ξ0), `hurst`, `eta`, `rho`, `factores` | V = ξ0·exp(ηY - ½η²t^{2H}), Y de Volterra | híbrido: paso cercano exacto + factores |
+| `fmls` (`log_estable`) | `volatilidad`, `alpha` ∈ (1, 2] | log-precio α-estable con saltos a la baja (β = -1) | exacto (Chambers-Mallows-Stuck) |
 
 Notas:
 
@@ -98,6 +101,7 @@ Notas:
 - En `vol_local`, `beta = 1` y `alpha = 0` es Black-Scholes; `beta < 1` da *skew* negativo (tipo CEV). En `sabr`, `alpha` es la volatilidad en el forward inicial (la α de Hagan es `alpha·F0^(1-beta)`). `vol_max` (300% por defecto) acota la volatilidad instantánea cuando el precio cae mucho.
 - En `nig` hace falta 1 - σ²κ - 2θκ > 0 (si no, el precio descontado no sería una martingala); `theta < 0` da asimetría bajista y `kappa` controla el grosor de las colas.
 - La correlación entre subyacentes se aplica a sus brownianos principales; la correlación precio-volatilidad (`rho`) es la de cada modelo; los saltos son independientes entre subyacentes.
+- Modelos fraccionarios ([FRACCIONAL.md](FRACCIONAL.md)): `hurst` ∈ (0, 0.5] (0.5 es el modelo clásico); `factores` (17 por defecto, opcional) es el número de exponenciales con que se aproxima el núcleo fraccionario en la simulación; como mucho 4 subyacentes rugosos por producto. En `fmls`, α = 2 es Black-Scholes con `volatilidad`; en la cesta, el ángulo de la simulación estable sale del browniano principal (cópula gaussiana).
 
 ## Correlación y cesta
 

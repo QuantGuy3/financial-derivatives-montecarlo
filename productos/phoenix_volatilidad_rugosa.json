@@ -1,0 +1,36 @@
+{
+  "formato": "producto-estructurado/1",
+  "plantilla": "phoenix",
+  "nombre": "Phoenix Autocallable Worst-of SX5E / SPX con volatilidad rugosa (3 años)",
+  "descripcion": "El mismo Phoenix que phoenix_worst_of.json, con modelos fraccionarios: rough Heston (H = 0.1) para el SX5E y rough Bergomi (H = 0.08) para el SPX. Cupón trimestral condicional del 2% con memoria (barrera 70%), autocancelable desde el segundo trimestre y barrera de capital del 60% a vencimiento.",
+  "nominal": 1000,
+  "moneda": "EUR",
+  "vencimiento": "3A",
+  "mercado": {"tipo_interes": "3%"},
+  "subyacentes": [
+    {
+      "nombre": "SX5E",
+      "spot": 4800,
+      "dividendos": "3%",
+      "modelo": {"tipo": "rough_heston", "vol_inicial": "18%", "kappa": 0.4, "vol_largo_plazo": "20%", "xi": 0.35,
+                 "rho": -0.7, "hurst": 0.1}
+    },
+    {
+      "nombre": "SPX",
+      "spot": 5600,
+      "dividendos": "1.5%",
+      "modelo": {"tipo": "rough_bergomi", "vol_inicial": "18%", "hurst": 0.08, "eta": 1.8, "rho": -0.9}
+    }
+  ],
+  "correlacion": 0.65,
+  "cesta": "peor",
+  "observaciones": {"frecuencia": "trimestral"},
+  "cupones": {"tipo": "condicional", "importe": "2%", "barrera": "70%", "memoria": true},
+  "autocancelacion": {"barrera": "100%", "desde": 2},
+  "barrera_capital": {"nivel": "60%", "observacion": "vencimiento"},
+  "amortizacion_final": [
+    {"tipo": "fijo", "importe": "100%"},
+    {"tipo": "put_vendida", "strike": "100%", "condicion": "barrera_tocada"}
+  ],
+  "simulacion": {"metodo": "auto", "error_objetivo": "0.05%", "semilla": 2024}
+}

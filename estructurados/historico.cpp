@@ -388,6 +388,11 @@ void imprimir_historico(std::ostream& os, const SerieHistorica& s, const Resulta
                << (r.hurst_vol_error >= 0 ? " ± " + fmt(r.hurst_vol_error, 3) : std::string())
                << "   (con varianza realizada por bloques de " << r.ventana_vol << " observaciones; "
                << "la volatilidad rugosa da H ≈ 0.1)\n";
+        // (H ≈ 0 indica que la log-volatilidad realizada es solo ruido de medida: volatilidad constante)
+        if (r.hurst_vol > 0.04 && r.hurst_vol < 0.3 &&
+            (r.hurst_vol_error < 0 || r.hurst_vol + 2.0 * r.hurst_vol_error < 0.5))
+            os << "   → volatilidad rugosa: los modelos rough_heston y rough_bergomi usan este H directamente\n"
+                  "     (\"hurst\"; ver estructurados/FRACCIONAL.md y 'estructurados fraccional')\n";
     }
     for (const auto& n : r.notas) os << "   · " << n << "\n";
     os << L << "\n Modelo propuesto (medida real; para valorar, la deriva será r - q):\n   ";
@@ -395,7 +400,7 @@ void imprimir_historico(std::ostream& os, const SerieHistorica& s, const Resulta
     const DefModelo& d = def_modelo(r.modelo.tipo);
     o.poner("tipo", d.clave);
     for (size_t i = 0; i < d.params.size(); ++i) {
-        if (d.params[i].clave == "vol_max") continue;
+        if (d.params[i].clave == "vol_max" || d.params[i].clave == "factores") continue;
         if (d.params[i].porcentaje) o.poner(d.params[i].clave, porcentaje(r.modelo.valores[i], 4));
         else o.poner(d.params[i].clave, std::round(r.modelo.valores[i] * 1e6) / 1e6);
     }

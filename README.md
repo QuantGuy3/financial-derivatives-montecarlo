@@ -80,7 +80,7 @@ Los cuatro modelos nuevos funcionan con los cuatro métodos (MC, QMC, MLMC, MLQM
 
 **Pagos a medida.** Además de las piezas habituales, el pago a vencimiento puede ser una **curva por puntos** (`{"tipo": "curva", "puntos": [["0%", "90%"], ["100%", "100%"], ["130%", "135%"]]}`, lo que guarda el diseñador al dibujar el pago) o una **fórmula** en el rendimiento P (`{"tipo": "formula", "expresion": "100% + 50% * max(P - 1, 0)^2"}`, con `max`, `min`, `abs`, `exp`, `log`, `sqrt`, `si(c,a,b)`, `call(k)`, `put(k)`, `digital(k)`...). La curva se descompone de forma exacta en piezas elementales; la fórmula se compila a un pequeño código de pila que evalúan igual la CPU y la GPU. Plantillas: `pago_a_medida` y `pago_por_puntos`.
 
-**Modelos por subyacente.** `black_scholes`, `heston`, `merton`, `bates`, `vol_local` (paramétrica tipo Dupire/CEV), `sabr` y `nig`; cada subyacente puede llevar uno distinto y la correlación se aplica a sus brownianos principales (`estructurados modelos` lista los parámetros).
+**Modelos por subyacente.** `black_scholes`, `heston`, `merton`, `bates`, `vol_local` (paramétrica tipo Dupire/CEV), `sabr`, `nig` y los fraccionarios `rough_heston`, `rough_bergomi` y `fmls` (ver más abajo); cada subyacente puede llevar uno distinto y la correlación se aplica a sus brownianos principales (`estructurados modelos` lista los parámetros).
 
 **Valoración.** El núcleo que simula una trayectoria y evalúa el producto (`estructurados/simulacion_hd.hpp`) es código `__host__ __device__`: el mismo lo ejecutan el kernel CUDA (un hilo por trayectoria, ruido generado en el propio hilo con Philox o Sobol + scrambling de Hong-Hickernell, sin buffers de ruido en memoria global) y el motor CPU multihilo de doble precisión. Con la misma semilla ambos recorren las mismas trayectorias. El número de trayectorias se adapta al error estándar objetivo (MC: piloto + N = Var/error²; QMC: duplicación de puntos con 16 réplicas). El informe incluye la descomposición del valor (cupones, amortización anticipada y final), probabilidades de autocancelación por fecha, vida media, probabilidad de tocar la barrera y de pérdida, y con `--griegas` delta, gamma, vega y rho por diferencias finitas con números aleatorios comunes.
 
@@ -120,7 +120,7 @@ Los detalles del formato, de la cadena CSV y de las opciones de `replicar` está
 - **Datos**: superficie de volatilidades o cotizaciones en JSON, o la misma cadena CSV de la réplica (con columnas de yfinance). Forward y descuento de cada vencimiento implícitos por **paridad put-call** cuando hay calls y puts del mismo strike; se usa la opción fuera del dinero de cada strike; filtros de plazo, moneyness y volumen.
 - **Objetivo** en volatilidad implícita, con pesos iguales, por vega o por la horquilla bid-ask. Parámetros con rangos impuestos por transformación logística.
 - **Optimizadores** propios: Levenberg-Marquardt con varios puntos de partida (por defecto), evolución diferencial + LM (global) y Nelder-Mead + LM.
-- **Precios rápidos**: Fourier de Lewis con la función característica evaluada una vez por vencimiento y control Black-Scholes (Heston, Bates, NIG), serie de Merton, Hagan (SABR) y Monte Carlo con números aleatorios comunes para la volatilidad local.
+- **Precios rápidos**: Fourier de Lewis con la función característica evaluada una vez por vencimiento y control Black-Scholes (Heston, Bates, NIG, FMLS y rough Heston, este con la ecuación de Riccati fraccionaria), serie de Merton, Hagan (SABR) y Monte Carlo con números aleatorios comunes para la volatilidad local y rough Bergomi.
 - **Diagnóstico**: errores estándar y correlaciones de los parámetros (identificabilidad), parámetros en el borde, condición de Feller, ajuste por strike en puntos básicos y fracción dentro de la horquilla; salida en JSON y CSV.
 - **SVI** por vencimiento con comprobación de arbitraje de mariposa y de calendario.
 - **Histórico**: Black-Scholes y Merton por máxima verosimilitud con contraste de razón de verosimilitudes, y exponentes de Hurst del precio y de la log-volatilidad.
@@ -128,7 +128,28 @@ Los detalles del formato, de la cadena CSV y de las opciones de `replicar` está
 
 Detalles en [`estructurados/CALIBRACION.md`](estructurados/CALIBRACION.md).
 
-**Validación.** `tests/test_estructurados.cpp` contrasta el motor con precios cerrados o semianalíticos: casos deterministas exactos (cupón cero, bono con curva, memoria, range accrual, cliquet, autocancelación), Black-Scholes (call, put, digital, reverse convertible, put down-and-in continua frente a Reiner-Rubinstein, shark fin), los siete modelos (Fourier, serie de Merton, Hagan, martingala), cestas worst-of/best-of frente a la normal bivariante, QMC y la equivalencia precisión simple/doble. Si hay GPU, compara además GPU y CPU trayectoria a trayectoria.
+## Modelos fraccionarios
+
+```bash
+./build/estructurados fraccional                                      # catálogo de modelos y métodos
+./build/estructurados fraccional precio rough_heston hurst=0.1 --vencimiento 3M   # un precio, todos los métodos
+./build/estructurados fraccional precio fmls alpha=1.4 --barrera 85     # EDP fraccionaria con barrera
+./build/estructurados fraccional sonrisa rough_bergomi hurst=0.07       # sonrisa y ley de potencia del skew
+./build/estructurados fraccional fbm --hurst 0.3 --csv fbm.csv          # trayectorias del fBm
+./build/estructurados calibrar mercado.json --modelo rough_heston      # calibra también el Hurst
+```
+
+| Modelo | Lo fraccionario | Métodos numéricos |
+|---|---|---|
+| `rough_heston` (motor) | núcleo t^{H-½} en la varianza | Fourier con la ecuación de Riccati fraccionaria (regla trapezoidal fraccionaria implícita) · Monte Carlo de la varianza forward con QE y factores markovianos |
+| `rough_bergomi` (motor) | volatilidad lognormal de Volterra | esquema híbrido de Bennedsen-Lunde-Pakkanen con FFT · híbrido-markoviano en el motor |
+| `fmls` (motor) | saltos α-estables: derivada fraccionaria en espacio | Fourier · EDP con Grünwald desplazado y ponderado + Crank-Nicolson (también con barrera) · Chambers-Mallows-Stuck |
+| `fbs`, `fbs_mixto` | movimiento browniano fraccionario | fórmula cerrada · fBm por Davies-Harte (FFT) o Cholesky, asiáticas con variable de control |
+| `subdifusivo` | derivada de Caputo en tiempo | cuadratura de Kanter · esquema L1 en malla graduada + Richardson · Monte Carlo exacto |
+
+Los tres primeros funcionan en los productos estructurados (CPU y GPU), en la réplica estática y en la calibración. Cada método está contrastado con otro independiente (Fourier frente a EDP y simulación, el esquema del motor frente al híbrido de referencia, L1 frente a la cuadratura...). Detalles, precisión y referencias en [`estructurados/FRACCIONAL.md`](estructurados/FRACCIONAL.md).
+
+**Validación.** `tests/test_estructurados.cpp` contrasta el motor con precios cerrados o semianalíticos: casos deterministas exactos (cupón cero, bono con curva, memoria, range accrual, cliquet, autocancelación), Black-Scholes (call, put, digital, reverse convertible, put down-and-in continua frente a Reiner-Rubinstein, shark fin), los modelos (Fourier, serie de Merton, Hagan, martingala), cestas worst-of/best-of frente a la normal bivariante, QMC, la equivalencia precisión simple/doble y los modelos fraccionarios (Riccati fraccionaria frente a Heston con H = ½, motor frente a Fourier y frente al esquema híbrido, EDP frente a Fourier, L1 frente a la cuadratura, covarianzas del fBm, calibración del Hurst). Si hay GPU, compara además GPU y CPU trayectoria a trayectoria.
 
 ## Compilación
 
@@ -146,12 +167,13 @@ Sin `nvcc` (o con `-DMC_USAR_CUDA=OFF`) se compila igualmente la parte CPU: el p
 - `models.hpp` / `payoffs.hpp`: parámetros de los modelos de precio (GBM, Heston, Dupire local, cesta Dupire multi-activo, Merton, Bates, SABR, NIG) y de los payoffs (europea, asiática aritmética/geométrica, lookback, barrera, basket), como `std::variant`.
 - `utils.hpp` / `utils.cpp`: fórmulas analíticas de referencia, precómputo de Brownian Bridge y PCA en CPU (Eigen), estimación del sesgo por Richardson, acumuladores *running* (`RunningStats`, media/varianza en un solo paso) y tablas de resultados.
 - `methods_cuda.cuh` / `methods_cuda.cu`: implementación GPU de los cuatro métodos (`run_mc_cuda`, `run_qmc_cuda`, `run_mlmc_cuda`, `run_mlqmc_cuda`), variables de control e importance sampling.
-- `hd_comun.hpp` / `modelos_hd.hpp`: código compartido CPU/GPU — Philox4x32-10, Sobol con scrambling de Hong-Hickernell, inversa de la normal y los pasos de los siete modelos de subyacente.
+- `hd_comun.hpp` / `modelos_hd.hpp`: código compartido CPU/GPU — Philox4x32-10, Sobol con scrambling de Hong-Hickernell, inversa de la normal y los pasos de los diez modelos de subyacente (incluidos rough Heston, rough Bergomi y FMLS).
+- `fraccional/`: biblioteca de modelos fraccionarios — Mittag-Leffler, núcleo fraccionario y sus factores markovianos, FFT, fBm (Davies-Harte, Cholesky), Riccati fraccionaria de rough Heston, esquema híbrido de rough Bergomi, FMLS (función característica, EDP, CMS), Black-Scholes fraccionario/mixto y subdifusivo.
 - `referencias.hpp` / `referencias.cpp`: precios de referencia (Black-Scholes con dividendos, digitales y barreras, Merton, Fourier para Heston/Bates/NIG, Hagan para SABR, normal bivariante).
-- `estructurados/`: módulo de productos estructurados — lectura/escritura JSON (`json.*`), definición y validación (`producto.*`), fórmulas de pago (`expresion.*`), ficha (`ficha.cpp`), plantillas y asistente (`plantillas.*`, `asistente.*`), núcleo de simulación (`simulacion_hd.hpp`, `plan.hpp`), motores CPU y GPU (`motor_cpu.cpp`, `motor_gpu.cu`), valoración y griegas (`valoracion.*`), precios de opciones europeas por modelo y volatilidad implícita (`vanilla.*`), cadenas de opciones en CSV (`cotizaciones.*`), perfiles lineales a trozos y su descomposición de Carr-Madan (`perfil.*`), réplica estática (`replicacion.*`), optimizadores (`optimizacion.*`), datos de mercado (`mercado.*`), calibración y SVI (`calibracion.*`), estimación histórica (`historico.*`), programa `estructurados` (`main.cpp`), la referencia del formato (`FORMATO.md`) y la de la calibración (`CALIBRACION.md`).
+- `estructurados/`: módulo de productos estructurados — lectura/escritura JSON (`json.*`), definición y validación (`producto.*`), fórmulas de pago (`expresion.*`), ficha (`ficha.cpp`), plantillas y asistente (`plantillas.*`, `asistente.*`), núcleo de simulación (`simulacion_hd.hpp`, `plan.hpp`), motores CPU y GPU (`motor_cpu.cpp`, `motor_gpu.cu`), valoración y griegas (`valoracion.*`), precios de opciones europeas por modelo y volatilidad implícita (`vanilla.*`), cadenas de opciones en CSV (`cotizaciones.*`), perfiles lineales a trozos y su descomposición de Carr-Madan (`perfil.*`), réplica estática (`replicacion.*`), optimizadores (`optimizacion.*`), datos de mercado (`mercado.*`), calibración y SVI (`calibracion.*`), estimación histórica (`historico.*`), el comando `fraccional` (`fraccional_cli.*`), programa `estructurados` (`main.cpp`), la referencia del formato (`FORMATO.md`), la de la calibración (`CALIBRACION.md`) y la de los modelos fraccionarios (`FRACCIONAL.md`).
 - `herramientas/disenador_productos.html`: diseñador visual de productos (HTML autocontenido) que genera el JSON; incluye el dibujo del pago y su réplica estática.
 - `herramientas/descargar_cadena.py`: descarga una cadena de opciones de Yahoo Finance (yfinance) al CSV que lee el programa.
-- `productos/`: productos de ejemplo en JSON (Phoenix, Athena, reverse convertible, capital protegido, bonus, twin-win, shark fin, range accrual, cliquet, opción europea, un autocallable vivo con fechas reales, un pago dibujado y uno con fórmula), una cadena de opciones sintética (`cadena_ejemplo_spx.csv`) para la réplica con strikes cotizados y una superficie de volatilidades sintética (`mercado_ejemplo_sx5e.json`) para la calibración.
+- `productos/`: productos de ejemplo en JSON (Phoenix, Athena, reverse convertible, capital protegido, bonus, twin-win, shark fin, range accrual, cliquet, opción europea, un autocallable vivo con fechas reales, un pago dibujado, uno con fórmula y un Phoenix con volatilidad rugosa), una cadena de opciones sintética (`cadena_ejemplo_spx.csv`) para la réplica con strikes cotizados y una superficie de volatilidades sintética (`mercado_ejemplo_sx5e.json`) para la calibración.
 - `examples/`: 15 ejemplos ejecutables (`ejemplo01`…`ejemplo15`) que cubren europea, asiática, lookback, barrera, Heston, Dupire, cestas correlacionadas/no correlacionadas, variables de control, importance sampling, Merton, Bates, SABR y NIG.
 - `tests/`: tests del módulo de productos estructurados.
 - `colab_build.sh`: script de compilación pensado para un entorno Google Colab con GPU.

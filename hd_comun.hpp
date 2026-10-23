@@ -48,6 +48,10 @@ HD_INLINE float  max_(float a, float b)   { return fmaxf(a, b); }
 HD_INLINE double max_(double a, double b) { return fmax(a, b); }
 HD_INLINE float  pow_(float a, float b)   { return powf(a, b); }
 HD_INLINE double pow_(double a, double b) { return pow(a, b); }
+HD_INLINE float  sin_(float x)  { return sinf(x); }
+HD_INLINE double sin_(double x) { return sin(x); }
+HD_INLINE float  cos_(float x)  { return cosf(x); }
+HD_INLINE double cos_(double x) { return cos(x); }
 
 template<typename Real>
 HD_INLINE Real clamp_(Real x, Real lo, Real hi) { return min_(max_(x, lo), hi); }

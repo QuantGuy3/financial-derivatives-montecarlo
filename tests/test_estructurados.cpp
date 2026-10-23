@@ -20,9 +20,11 @@
 #include "estructurados/replicacion.hpp"
 #include "estructurados/valoracion.hpp"
 #include "estructurados/vanilla.hpp"
+#include "fraccional/fraccional.hpp"
 #include "referencias.hpp"
 
 #include <fstream>
+#include <random>
 
 #include <algorithm>
 #include <cmath>
@@ -272,7 +274,10 @@ void test_modelos() {
         R"({"tipo": "bates", "vol_inicial": 0.2, "kappa": 1, "vol_largo_plazo": 0.2, "xi": 0.6, "rho": -0.5, "lambda": 1, "media_salto": -0.15, "vol_salto": 0.2})",
         R"({"tipo": "vol_local", "sigma0": 0.25, "alpha": 0.3, "beta": 0.5})",
         R"({"tipo": "sabr", "alpha": 0.25, "beta": 0.5, "nu": 0.6, "rho": -0.6})",
-        R"({"tipo": "nig", "sigma": 0.25, "theta": -0.2, "kappa": 0.5})"};
+        R"({"tipo": "nig", "sigma": 0.25, "theta": -0.2, "kappa": 0.5})",
+        R"({"tipo": "rough_heston", "vol_inicial": 0.2, "kappa": 0.5, "vol_largo_plazo": 0.25, "xi": 0.5, "rho": -0.8, "hurst": 0.1})",
+        R"({"tipo": "rough_bergomi", "vol_inicial": 0.25, "hurst": 0.08, "eta": 2.0, "rho": -0.9})",
+        R"({"tipo": "fmls", "volatilidad": 0.25, "alpha": 1.4})"};
     for (const char* m : modelos) {
         Producto p = compilar_texto(un_activo(m, 0.02, 2.0, 0.04, R"("amortizacion_final": [{"tipo": "lineal"}])"));
         auto res = mc(p, 200000);
@@ -347,7 +352,8 @@ void test_qmc() {
 void test_float_vs_double() {
     // La GPU simula en float por defecto: el mismo flujo Philox en float y en
     // double debe dar prácticamente el mismo precio (mismas trayectorias).
-    Producto p = compilar_texto(R"({"vencimiento": "2A", "mercado": {"tipo_interes": "3%"},
+    std::vector<std::pair<std::string, Producto>> casos;
+    casos.push_back({"Precisión simple (GPU) frente a doble (CPU)", compilar_texto(R"({"vencimiento": "2A", "mercado": {"tipo_interes": "3%"},
         "subyacentes": [{"nombre": "A", "dividendos": "2%", "modelo": {"tipo": "heston", "vol_inicial": 0.2, "kappa": 1.5,
                           "vol_largo_plazo": 0.2, "xi": 0.6, "rho": -0.7}},
                         {"nombre": "B", "modelo": {"tipo": "merton", "volatilidad": 0.15, "lambda": 1, "media_salto": -0.1, "vol_salto": 0.1}}],
@@ -355,29 +361,42 @@ void test_float_vs_double() {
         "cupones": {"importe": "2%", "barrera": "75%", "memoria": true},
         "autocancelacion": {"barrera": "100%", "desde": 2},
         "barrera_capital": {"nivel": "60%", "observacion": "continua"},
-        "amortizacion_final": [{"tipo": "fijo"}, {"tipo": "put_vendida", "condicion": "barrera_tocada"}]})");
-    auto pf = construir_plan<float>(p);
-    auto pd = construir_plan<double>(p);
-    const int N = (int)(20000 * g_escala) + 1000;
-    double sf = 0, sd = 0, maxdif = 0;
-    RegistroNulo reg;
-    for (int i = 0; i < N; ++i) {
-        RuidoPhilox<float> rf;
-        rf.iniciar(5u, (uint64_t)i, 0u);
-        RuidoPhilox<double> rd;
-        rd.iniciar(5u, (uint64_t)i, 0u);
-        ResTray<float> a{};
-        ResTray<double> b{};
-        simular_trayectoria(pf->vista, rf, reg, a);
-        simular_trayectoria(pd->vista, rd, reg, b);
-        sf += a.pv;
-        sd += b.pv;
-        maxdif = std::max(maxdif, std::fabs((double)a.pv - b.pv));
+        "amortizacion_final": [{"tipo": "fijo"}, {"tipo": "put_vendida", "condicion": "barrera_tocada"}]})")});
+    casos.push_back({"Precisión simple frente a doble: modelos fraccionarios", compilar_texto(R"({"vencimiento": "2A", "mercado": {"tipo_interes": "3%"},
+        "subyacentes": [{"nombre": "A", "dividendos": "1%", "modelo": {"tipo": "rough_heston", "vol_inicial": 0.2, "kappa": 0.4,
+                          "vol_largo_plazo": 0.22, "xi": 0.4, "rho": -0.7, "hurst": 0.1}},
+                        {"nombre": "B", "modelo": {"tipo": "rough_bergomi", "vol_inicial": 0.22, "hurst": 0.08, "eta": 1.9, "rho": -0.9}},
+                        {"nombre": "C", "modelo": {"tipo": "fmls", "volatilidad": 0.2, "alpha": 1.5}}],
+        "correlacion": 0.5, "observaciones": "trimestral",
+        "cupones": {"importe": "2%", "barrera": "75%", "memoria": true},
+        "autocancelacion": {"barrera": "100%", "desde": 2},
+        "barrera_capital": {"nivel": "60%", "observacion": "continua"},
+        "amortizacion_final": [{"tipo": "fijo"}, {"tipo": "put_vendida", "condicion": "barrera_tocada"}]})")});
+    for (auto& c : casos) {
+        const Producto& p = c.second;
+        auto pf = construir_plan<float>(p);
+        auto pd = construir_plan<double>(p);
+        const int N = (int)(20000 * g_escala) + 1000;
+        double sf = 0, sd = 0, maxdif = 0;
+        RegistroNulo reg;
+        for (int i = 0; i < N; ++i) {
+            RuidoPhilox<float> rf;
+            rf.iniciar(5u, (uint64_t)i, 0u);
+            RuidoPhilox<double> rd;
+            rd.iniciar(5u, (uint64_t)i, 0u);
+            ResTray<float> a{};
+            ResTray<double> b{};
+            simular_trayectoria(pf->vista, rf, reg, a);
+            simular_trayectoria(pd->vista, rd, reg, b);
+            sf += a.pv;
+            sd += b.pv;
+            maxdif = std::max(maxdif, std::fabs((double)a.pv - b.pv));
+        }
+        char buf[200];
+        std::snprintf(buf, sizeof buf, "media float=%.6f double=%.6f |dif|=%.2e (máx. por trayectoria %.2e)", sf / N,
+                      sd / N, std::fabs(sf - sd) / N, maxdif);
+        resultado(std::isfinite(sf) && std::fabs(sf - sd) / N < 2e-4, c.first, buf);
     }
-    char buf[200];
-    std::snprintf(buf, sizeof buf, "media float=%.6f double=%.6f |dif|=%.2e (máx. por trayectoria %.2e)", sf / N, sd / N,
-                  std::fabs(sf - sd) / N, maxdif);
-    resultado(std::fabs(sf - sd) / N < 2e-4, "Precisión simple (GPU) frente a doble (CPU)", buf);
 }
 
 // Solo con GPU: el motor GPU y el CPU recorren exactamente las mismas
@@ -387,6 +406,17 @@ void test_gpu_frente_a_cpu() {
     std::vector<std::pair<std::string, Producto>> casos;
     casos.push_back({"Phoenix worst-of (Heston + BS)",
                      cargar(std::string(MC_DIR_FUENTES) + "/productos/phoenix_worst_of.json")});
+    casos.push_back({"Peor de 3 fraccionarios (rough Heston, rough Bergomi, FMLS)", compilar_texto(R"({
+        "vencimiento": "2A", "mercado": {"tipo_interes": "2%"},
+        "subyacentes": [
+          {"nombre": "A", "dividendos": "1%", "modelo": {"tipo": "rough_heston", "vol_inicial": 0.2, "kappa": 0.4, "vol_largo_plazo": 0.22, "xi": 0.4, "rho": -0.7, "hurst": 0.1}},
+          {"nombre": "B", "modelo": {"tipo": "rough_bergomi", "vol_inicial": 0.22, "hurst": 0.1, "eta": 1.8, "rho": -0.85}},
+          {"nombre": "C", "modelo": {"tipo": "fmls", "volatilidad": 0.2, "alpha": 1.6}}],
+        "correlacion": 0.5, "observaciones": "trimestral",
+        "cupones": {"importe": "2%", "barrera": "80%", "memoria": true},
+        "autocancelacion": {"barrera": "100%"},
+        "barrera_capital": {"nivel": "60%", "observacion": "vencimiento"},
+        "amortizacion_final": [{"tipo": "fijo"}, {"tipo": "put_vendida", "condicion": "barrera_tocada"}]})")});
     casos.push_back({"Cesta de 3 (Bates, NIG, SABR) con KO y rango", compilar_texto(R"({
         "vencimiento": "2A", "mercado": {"curva": [["1A", "2%"], ["2A", "3%"]]},
         "subyacentes": [
@@ -1035,6 +1065,198 @@ void test_historico() {
 
 } // namespace
 
+
+// ------------------------------------------------------------------------- //
+// Modelos fraccionarios: cada método frente a otro independiente             //
+// ------------------------------------------------------------------------- //
+void test_fraccionarios() {
+    // Funciones especiales y núcleo
+    {
+        double peor = 0;
+        for (double x : {0.3, 1.0, 2.5, 6.0}) peor = std::max(peor, std::fabs(frac::mittag_leffler(0.5, x) / (std::exp(x * x) * std::erfc(x)) - 1));
+        peor = std::max(peor, std::fabs(frac::mittag_leffler(1.0, 2.0) - std::exp(-2.0)));
+        char buf[64];
+        std::snprintf(buf, sizeof buf, "error relativo %.1e", peor);
+        resultado(peor < 1e-11, "Mittag-Leffler: E_1/2(-x) = exp(x²)·erfc(x) y E_1 = exp", buf);
+        double e = 0;
+        for (double H : {0.05, 0.1, 0.3}) e = std::max(e, frac::error_nodos(frac::nodos_nucleo(H, 17, 1.0 / 252, 2.0), H, 1.0 / 252, 2.0));
+        std::snprintf(buf, sizeof buf, "error relativo máximo %.1e", e);
+        resultado(e < 1e-3, "Núcleo fraccionario: 17 factores markovianos en [1/252, 2]", buf);
+    }
+    // fBm: Davies-Harte y Cholesky reproducen la covarianza
+    for (auto met : {frac::GeneradorFBM::Metodo::DaviesHarte, frac::GeneradorFBM::Metodo::Cholesky}) {
+        const double H = 0.3, T = 2.0;
+        const int n = 128;
+        const long long N = std::max(4000LL, (long long)(40000 * g_escala));
+        frac::GeneradorFBM g(H, n, T, met);
+        std::mt19937_64 gen(5);
+        std::vector<double> B;
+        double vT = 0, c = 0, inc = 0;
+        for (long long i = 0; i < N; ++i) {
+            g.generar(gen, B);
+            vT += B[n] * B[n];
+            c += B[n / 2] * B[n];
+            inc += (B[1] - B[0]) * (B[2] - B[1]);
+        }
+        const double th = std::pow(T, 2 * H), tol = 4.0 * std::sqrt(2.0 / N);
+        const double r1 = vT / N / th - 1, r2 = c / N / (0.5 * th) - 1;
+        const double rho1 = inc / N / std::pow(T / n, 2 * H) - (std::pow(2.0, 2 * H - 1) - 1);
+        char buf[128];
+        std::snprintf(buf, sizeof buf, "Var %+.3f, Cov %+.3f (rel.), corr. incr. %+.3f", r1, r2, rho1);
+        resultado(std::fabs(r1) < tol && std::fabs(r2) < 1.5 * tol && std::fabs(rho1) < 2 * tol,
+                  std::string("fBm por ") + (met == frac::GeneradorFBM::Metodo::DaviesHarte ? "Davies-Harte" : "Cholesky") +
+                      ": covarianzas",
+                  buf);
+    }
+    // Rough Heston: H = 1/2 es Heston; convergencia de la Riccati fraccionaria
+    {
+        frac::RoughHeston p{0.5, 0.04, 0.05, 1.2, 0.4, -0.6};
+        double peor = 0;
+        for (double u : {0.7, 3.0, 12.0}) {
+            const std::complex<double> z(u, -0.5);
+            peor = std::max(peor, std::abs(frac::fc_rough_heston(p, z, 1.5, 256) - ref::fc_heston(0.04, 1.2, 0.05, 0.4, -0.6, 1.5)(z)));
+        }
+        char buf[64];
+        std::snprintf(buf, sizeof buf, "máx |Δφ| = %.1e", peor);
+        resultado(peor < 2e-6, "Rough Heston con H = 1/2: función característica de Heston", buf);
+        p.H = 0.1;
+        const std::complex<double> z(3.0, -0.5);
+        const double d = std::abs(frac::fc_rough_heston(p, z, 1.0, 128) - frac::fc_rough_heston(p, z, 1.0, 1024));
+        std::snprintf(buf, sizeof buf, "|φ(N=128) - φ(N=1024)| = %.1e", d);
+        resultado(d < 1e-5, "Rough Heston: convergencia de la regla trapezoidal implícita", buf);
+    }
+    // Rough Heston en el motor (varianza forward + QE) frente a Fourier
+    for (double H : {0.5, 0.1}) {
+        const std::string mod = std::string(R"({"tipo": "rough_heston", "vol_inicial": 0.2, "kappa": 0.3, "vol_largo_plazo": 0.2, "xi": 0.3, "rho": -0.7, "hurst": )") +
+                                num(H) + "}";
+        for (double K : {0.9, 1.1}) {
+            Producto p = compilar_texto(un_activo(mod, 0.01, 1.0, 0.03,
+                R"("amortizacion_final": [{"tipo": "call", "strike": )" + num(K) + "}]"));
+            auto res = mc(p, 400000);
+            PreciosVanilla pv(p.activos[0], p.curva);
+            comparar("Rough Heston H=" + num(H) + ": motor (QE) frente a Fourier, K=" + num(K), res.precio, res.error,
+                     pv.call(1.0, 100 * K) / 100, 0.0008);
+        }
+    }
+    // Rough Bergomi: esquema híbrido-markoviano del motor frente al híbrido de BLP con FFT
+    {
+        Activo a;
+        a.spot = a.nivel_inicial = 1.0;
+        a.modelo = modelo_con("rough_bergomi", {{"vol_inicial", 0.2}, {"hurst", 0.1}, {"eta", 1.9}, {"rho", -0.9}});
+        Curva c0;
+        c0.t = {1.0};
+        c0.r = {0.0};
+        OpcionesMCVanilla o;
+        o.trayectorias = std::max(40000LL, (long long)(400000 * g_escala));
+        PreciosVanilla pv(a, c0, o);
+        frac::RoughBergomi p{0.1, 0.04, 1.9, -0.9};
+        const std::vector<double> Ks = {0.85, 1.0, 1.15};
+        auto R = frac::rbergomi_hibrido(p, 1.0, 252, o.trayectorias, Ks, 3);
+        for (size_t i = 0; i < Ks.size(); ++i) {
+            const double se = std::sqrt(std::pow(pv.error_mc(1.0, Ks[i], true), 2) + R[i].error * R[i].error);
+            comparar("Rough Bergomi: motor frente a esquema híbrido BLP, K=" + num(Ks[i]), pv.call(1.0, Ks[i]), se, R[i].precio, 0);
+        }
+    }
+    // FMLS: Fourier, EDP fraccionaria en espacio y simulación exacta
+    {
+        frac::FMLS p{1.5, 0.25};
+        double peor = 0;
+        Activo a;
+        a.spot = a.nivel_inicial = 100;
+        a.dividendos = 0.01;
+        a.modelo = modelo_con("fmls", {{"volatilidad", 0.25}, {"alpha", 1.5}});
+        Curva c;
+        c.t = {1.0};
+        c.r = {0.03};
+        PreciosVanilla pv(a, c);
+        for (double K : {80.0, 100.0, 125.0})
+            for (bool call : {true, false}) {
+                const double e = frac::fmls_edp(p, call, 100, K, 0.75, 0.03, 0.01, 0.0, {800, 120});
+                const double f = call ? pv.call(0.75, K) : pv.put(0.75, K);
+                peor = std::max(peor, std::fabs(e - f));
+            }
+        char buf[96];
+        std::snprintf(buf, sizeof buf, "máx |EDP - Fourier| = %.1e (S = 100)", peor);
+        resultado(peor < 2e-3, "FMLS: EDP fraccionaria (WSGD + Crank-Nicolson) = Fourier", buf);
+        frac::FMLS p2{2.0, 0.25};
+        const double f2 = ref::precio_fourier(true, [&](std::complex<double> u) { return frac::fc_fmls(p2, u, 1.0); }, 100, 105, 1.0, 0.03, 0.01);
+        exacto("FMLS con α = 2 es Black-Scholes", f2, ref::bs_precio(true, 100, 105, 1.0, 0.03, 0.01, 0.25), 1e-7);
+        const double lejos = frac::fmls_edp(p, true, 100, 100, 0.75, 0.03, 0.01, 1.0, {800, 120});
+        std::snprintf(buf, sizeof buf, "down-and-out con B = 1: %.5f, europea %.5f", lejos, pv.call(0.75, 100));
+        resultado(std::fabs(lejos - pv.call(0.75, 100)) < 5e-3, "FMLS: barrera muy lejana = europea (EDP)", buf);
+        Producto pr = compilar_texto(un_activo(R"({"tipo": "fmls", "volatilidad": 0.25, "alpha": 1.5})", 0.01, 0.75, 0.03,
+                                               R"("amortizacion_final": [{"tipo": "call", "strike": 0.95}])"));
+        auto res = mc(pr, 400000);
+        comparar("FMLS: motor (Chambers-Mallows-Stuck) frente a Fourier", res.precio, res.error, pv.call(0.75, 95) / 100, 0);
+    }
+    // Black-Scholes fraccionario y mixto
+    {
+        frac::FBS p{0.7, 0.0, 0.0};
+        p.sigma = 0.2;
+        exacto("fBS con σ_H = 0 es Black-Scholes", frac::fbs_precio(p, true, 100, 95, 1.3, 0.03, 0.01),
+               ref::bs_precio(true, 100, 95, 1.3, 0.03, 0.01, 0.2), 1e-12);
+        frac::FBS m{0.5, 0.15, 0.1};
+        exacto("fBS mixto con H = 1/2 es Black-Scholes con σ² + σ_H²", frac::fbs_precio(m, false, 100, 110, 2.0, 0.03, 0.0),
+               ref::bs_precio(false, 100, 110, 2.0, 0.03, 0.0, std::sqrt(0.0325)), 1e-12);
+        frac::FBS q{0.75, 0.1, 0.2};
+        auto R = frac::fbs_asiatica_mc(q, true, 100, 100, 1.0, 0.03, 0.01, 12, std::max(20000LL, (long long)(200000 * g_escala)), 9);
+        comparar("fBS mixto: asiática geométrica, MC con fBm (Davies-Harte) = cerrada", R.geometrica.precio,
+                 R.geometrica.error, frac::fbs_asiatica_geometrica(q, true, 100, 100, 1.0, 0.03, 0.01, 12), 0);
+    }
+    // Black-Scholes subdifusivo
+    {
+        frac::Subdifusivo s1{1.0, 0.25};
+        exacto("Subdifusivo con α = 1 es Black-Scholes", frac::subdif_precio(s1, true, 100, 90, 1.0, 0.02, 0.01),
+               ref::bs_precio(true, 100, 90, 1.0, 0.02, 0.01, 0.25), 1e-10);
+        frac::Subdifusivo s{0.7, 0.3};
+        double peor = 0;
+        for (double K : {80.0, 100.0, 125.0})
+            for (bool call : {true, false})
+                peor = std::max(peor, std::fabs(frac::subdif_edp(s, call, 100, K, 1.0, 0.02, 0.0, 400, 150) -
+                                                frac::subdif_precio(s, call, 100, K, 1.0, 0.02, 0.0)));
+        char buf[96];
+        std::snprintf(buf, sizeof buf, "máx |L1 - cuadratura| = %.1e (S = 100)", peor);
+        resultado(peor < 1e-3, "Subdifusivo: EDP de Caputo (L1 + Richardson) = cuadratura de Kanter", buf);
+        auto m = frac::subdif_mc(s, true, 100, 100, 1.0, 0.02, 0.0, std::max(100000LL, (long long)(1000000 * g_escala)), 4);
+        comparar("Subdifusivo: Monte Carlo del tiempo operacional = cuadratura", m.precio, m.error,
+                 frac::subdif_precio(s, true, 100, 100, 1.0, 0.02, 0.0), 0);
+        const double c = frac::subdif_precio(s, true, 100, 105, 1.5, 0.02, 0.01), pu = frac::subdif_precio(s, false, 100, 105, 1.5, 0.02, 0.01);
+        exacto("Subdifusivo: paridad put-call", c - pu, 100 * std::exp(-0.015) - 105 * std::exp(-0.03), 1e-8);
+    }
+    // Calibración: recupera un rough Heston (κ y θ fijos para acotar el tiempo)
+    {
+        Modelo verdad = modelo_con("rough_heston", {{"vol_inicial", 0.18}, {"kappa", 0.5}, {"vol_largo_plazo", 0.22},
+                                                     {"xi", 0.35}, {"rho", -0.65}, {"hurst", 0.12}});
+        DatosMercado m = superficie_sintetica(verdad);
+        OpcionesCalibracion o;
+        o.modelo = "rough_heston";
+        o.fijos = {{"kappa", 0.5}, {"vol_largo_plazo", 0.22}};
+        o.arranques = 2;
+        ResultadoCalibracion r = calibrar(m, o);
+        char buf[160];
+        std::snprintf(buf, sizeof buf, "H %.4f, ξ %.4f, ρ %.4f, RMSE %.1e pb (%.1f s)", r.modelo["hurst"], r.modelo["xi"],
+                      r.modelo["rho"], 1e4 * r.rmse, r.segundos);
+        resultado(std::fabs(r.modelo["hurst"] - 0.12) < 2e-3 && std::fabs(r.modelo["xi"] - 0.35) < 5e-3 &&
+                      std::fabs(r.modelo["rho"] + 0.65) < 5e-3 && r.rmse < 1e-5,
+                  "Calibración: recupera un rough Heston (Hurst incluido)", buf);
+    }
+    // Validación: como mucho MAX_RUGOSOS_HD subyacentes rugosos
+    {
+        std::string subs;
+        for (int i = 0; i < MAX_RUGOSOS_HD + 1; ++i)
+            subs += std::string(i ? "," : "") + R"({"nombre": "R)" + std::to_string(i) +
+                    R"(", "modelo": {"tipo": "rough_bergomi", "vol_inicial": 0.2, "hurst": 0.1, "eta": 1.5, "rho": -0.7}})";
+        bool error = false;
+        try {
+            compilar_texto(R"({"vencimiento": 1, "subyacentes": [)" + subs + R"(], "correlacion": 0.3,
+                              "amortizacion_final": [{"tipo": "lineal"}]})");
+        } catch (const ErrorProducto&) {
+            error = true;
+        }
+        resultado(error, "Validación: límite de subyacentes rugosos por producto", "");
+    }
+}
+
 int main(int argc, char** argv) {
     if (argc > 1 && std::strcmp(argv[1], "rapido") == 0) g_escala = 0.1;
     std::printf("== Tests del motor de productos estructurados (CPU) ==\n");
@@ -1047,6 +1269,7 @@ int main(int argc, char** argv) {
     test_mercado_y_paridad();
     test_calibracion();
     test_historico();
+    test_fraccionarios();
     test_deterministas();
     test_black_scholes();
     test_modelos();

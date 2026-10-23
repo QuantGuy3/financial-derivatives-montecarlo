@@ -102,6 +102,46 @@ std::vector<DefModelo> construir_catalogo() {
          P("kappa", {"curtosis"}, "varianza del subordinador κ (más alto = colas más gruesas)", 0.20, false,
            0.0, 20.0, true)},
         {"sigma"}});
+
+    // ---------------- Modelos fraccionarios (ver fraccional/ y FRACCIONAL.md) ---------------- //
+    const DefParam hurst = P("hurst", {"h", "exponente_hurst"},
+                             "exponente de Hurst H de la volatilidad (rugosa si H < 0.5; 0.5 = no rugosa)", 0.10,
+                             false, 0.0, 0.5, true);
+    const DefParam factores = P("factores", {"n_factores"},
+                                "factores markovianos con que se aproxima el núcleo fraccionario (solo simulación)",
+                                17, false, 3, MAX_FAC_HD, false);
+
+    c.push_back(DefModelo{TipoModelo::RoughBergomi, "rough_bergomi", {"rbergomi", "bergomi_rugoso"},
+        "Rough Bergomi",
+        "Volatilidad rugosa lognormal (Bayer-Friz-Gatheral 2016): V = ξ0·exp(ηY - ½η²t^{2H}), Y proceso de "
+        "Volterra fraccionario. Simulación híbrida (paso cercano exacto + factores markovianos).",
+        {P("vol_inicial", {"sqrt_xi0"}, "volatilidad forward plana √ξ0", 0.20, true, 0.0, 5.0, true, "xi0"),
+         hurst,
+         P("eta", {"vol_de_vol", "nu"}, "volatilidad de la volatilidad η", 1.9, false, 0.0, 10.0, true),
+         P("rho", {"correlacion_vol"}, "correlación precio-volatilidad", -0.90, false, -1.0, 1.0, false),
+         factores},
+        {"vol_inicial"}});
+
+    c.push_back(DefModelo{TipoModelo::RoughHeston, "rough_heston", {"heston_rugoso", "heston_fraccionario"},
+        "Rough Heston",
+        "Heston con núcleo fraccionario (El Euch-Rosenbaum 2019): skew ATM ~ T^{H-1/2}. Fourier por la "
+        "ecuación de Riccati fraccionaria; simulación de la varianza forward con QE y factores markovianos.",
+        {vol_heston,
+         P("kappa", {"lambda", "reversion"}, "velocidad de reversión a la media λ", 0.30, false, 0.0, 50.0, false),
+         vol_lp,
+         P("xi", {"nu", "vol_de_vol"}, "volatilidad de la varianza ν", 0.30, false, 0.0, 10.0, true),
+         P("rho", {"correlacion_vol"}, "correlación precio-volatilidad", -0.70, false, -1.0, 1.0, false),
+         hurst, factores},
+        {"vol_inicial", "vol_largo_plazo"}});
+
+    c.push_back(DefModelo{TipoModelo::FMLS, "fmls", {"log_estable", "carr_wu", "finite_moment_log_stable"},
+        "FMLS (log-estable de momentos finitos)",
+        "Carr-Wu (2003): el log-precio es un proceso α-estable con saltos solo a la baja (β = -1); "
+        "α = 2 es Black-Scholes. Simulación exacta (Chambers-Mallows-Stuck).",
+        {P("volatilidad", {"vol", "sigma"}, "volatilidad (la escala estable es σ/√2)", 0.20, true, 0.0, 5.0, true),
+         P("alpha", {"indice_estabilidad", "alfa"}, "índice de estabilidad α ∈ (1, 2] (menor = colas más gruesas)",
+           1.5, false, 1.0, 2.0, true)},
+        {"volatilidad"}});
     return c;
 }
 
@@ -564,7 +604,7 @@ Modelo leer_modelo(const Nodo& nm) {
             if (var < 0) nv.error("la varianza no puede ser negativa");
             val = std::sqrt(var);
             n = nv;
-        } else if (prm.clave == "vol_max") {
+        } else if (prm.clave == "vol_max" || prm.clave == "factores") {
             val = prm.defecto; // opcional
         } else {
             nm.error("falta el parámetro \"" + prm.clave + "\" del modelo " + d->nombre + " (" +
@@ -1104,6 +1144,13 @@ Producto compilar(const json::Valor& doc) {
         p.activos.push_back(a);
     }
     const size_t n = p.activos.size();
+    {
+        int rugosos = 0;
+        for (const auto& a : p.activos) rugosos += modelo_rugoso(a.modelo.tipo) ? 1 : 0;
+        if (rugosos > MAX_RUGOSOS_HD)
+            nsub.error("como máximo " + std::to_string(MAX_RUGOSOS_HD) +
+                       " subyacentes con modelos rugosos (rough_bergomi, rough_heston) por producto");
+    }
     leer_correlacion(raiz.campo("correlacion"), p);
 
     // ---------------- Cesta ---------------- //

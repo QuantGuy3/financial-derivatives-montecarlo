@@ -377,6 +377,24 @@ const MODELOS = [
       { k: 'sigma', t: 'Volatilidad σ', pct: true, def: 20, min: 0, max: 500, abierto: true },
       { k: 'theta', t: 'Asimetría θ', def: -0.1, min: -5, max: 5, ayuda: 'negativa = skew bajista' },
       { k: 'kappa', t: 'Curtosis κ', def: 0.2, min: 0, max: 20, abierto: true }] },
+  { clave: 'rough_heston', nombre: 'Rough Heston', desc: 'Heston con núcleo fraccionario: volatilidad rugosa (H < 0.5) y skew ATM ~ T^(H-1/2).',
+    params: [
+      { k: 'vol_inicial', t: 'Volatilidad inicial √v0', pct: true, def: 20, min: 0, max: 500 },
+      { k: 'kappa', t: 'Reversión λ', def: 0.3, min: 0, max: 50 },
+      { k: 'vol_largo_plazo', t: 'Volatilidad de largo plazo √θ', pct: true, def: 20, min: 0, max: 500, abierto: true },
+      { k: 'xi', t: 'Vol de la varianza ν', def: 0.3, min: 0, max: 10, abierto: true },
+      { k: 'rho', t: 'Correlación precio-vol ρ', def: -0.7, min: -1, max: 1 },
+      { k: 'hurst', t: 'Exponente de Hurst H', def: 0.1, min: 0, max: 0.5, abierto: true, ayuda: '0.5 = Heston clásico' }] },
+  { clave: 'rough_bergomi', nombre: 'Rough Bergomi', desc: 'Volatilidad rugosa lognormal (Bayer-Friz-Gatheral): V = ξ0·exp(ηY - ½η²t^(2H)).',
+    params: [
+      { k: 'vol_inicial', t: 'Volatilidad forward √ξ0', pct: true, def: 20, min: 0, max: 500, abierto: true },
+      { k: 'hurst', t: 'Exponente de Hurst H', def: 0.1, min: 0, max: 0.5, abierto: true },
+      { k: 'eta', t: 'Vol de la vol η', def: 1.9, min: 0, max: 10, abierto: true },
+      { k: 'rho', t: 'Correlación precio-vol ρ', def: -0.9, min: -1, max: 1 }] },
+  { clave: 'fmls', nombre: 'FMLS (log-estable)', desc: 'Saltos α-estables solo a la baja (Carr-Wu); α = 2 es Black-Scholes. Simulación exacta.',
+    params: [
+      { k: 'volatilidad', t: 'Volatilidad', pct: true, def: 20, min: 0, max: 500, abierto: true },
+      { k: 'alpha', t: 'Índice de estabilidad α', def: 1.5, min: 1, max: 2, abierto: true, ayuda: 'menor = colas más gruesas' }] },
 ];
 const modelo = clave => MODELOS.find(m => m.clave === clave) || MODELOS[0];
 function paramsPorDefecto(clave, vol) {
