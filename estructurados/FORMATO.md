@@ -199,6 +199,8 @@ Lo que se cobra a vencimiento si el producto sigue vivo, como suma de componente
 | `digital` | importe si P ≥ strike | `strike`, `importe` |
 | `digital_put` | importe si P < strike | `strike`, `importe` |
 | `cliquet` | part · clamp(Σⱼ clamp(Pⱼ/Pⱼ₋₁ - 1, suelo_local, techo_local), suelo_global, techo_global) | `suelo_local`, `techo_local`, `suelo_global` (0), `techo_global`, `participacion` |
+| `curva` | la curva que pasa por los `puntos` (P, pago), unidos por tramos rectos | `puntos`, `extrapolacion` (`"constante"` o `"lineal"`) |
+| `formula` | f(P), una expresión escrita como texto | `expresion` |
 
 Cada componente admite `"condicion"`: `"siempre"` (por defecto), `"barrera_tocada"` o `"barrera_no_tocada"`. Ejemplos:
 
@@ -212,6 +214,47 @@ Cada componente admite `"condicion"`: `"siempre"` (por defecto), `"barrera_tocad
  {"tipo": "call", "strike": "120%", "condicion": "barrera_no_tocada"},
  {"tipo": "lineal", "condicion": "barrera_tocada"}]
 ```
+
+### Pagos a medida: curva por puntos y fórmula
+
+Para un pago que no sale de sumar las piezas anteriores hay dos componentes más.
+
+**`curva`**: el pago se da en una tabla de puntos `[P, pago]` ordenados por P y unidos por tramos rectos. Dos puntos con el mismo P marcan un salto (a la izquierda vale el primero; en P y a la derecha, el segundo). Fuera de los puntos el pago se mantiene constante, o sigue la pendiente del tramo extremo con `"extrapolacion": "lineal"`. Es lo que guarda el diseñador visual en su plantilla *Pago dibujado*.
+
+```json
+{"tipo": "curva", "extrapolacion": "constante",
+ "puntos": [["0%", "90%"], ["90%", "90%"], ["100%", "100%"], ["130%", "130%"], ["130%", "135%"], ["200%", "135%"]]}
+```
+
+Al leerla, la curva se descompone de forma exacta en un fijo, un lineal, calls en cada cambio de pendiente y digitales en cada salto: el motor (CPU y GPU) no necesita nada nuevo y el resultado es idéntico al de escribir esas piezas a mano.
+
+**`formula`**: el pago es una expresión en P (en tanto por uno: `1` = 100%), evaluada igual en CPU y en GPU:
+
+```json
+{"tipo": "formula", "expresion": "100% + 50% * max(P - 1, 0)^2"}
+```
+
+| Elemento | Ejemplos |
+|---|---|
+| Números | `1.5`, `2e-3`, `100%`, `25pb` |
+| Variables | `P` (rendimiento); con un único subyacente también `S` (precio = P × nivel inicial) |
+| Operadores | `+ - * / ^` (`-P^2` = −(P²); `a^b^c` = a^(b^c)); comparaciones `< <= > >= == !=` (valen 1 o 0) |
+| Funciones | `max(a, b, ...)`, `min(...)`, `abs`, `exp`, `log` (`ln`), `sqrt` (`raiz`), `pow(a, b)`, `si(c, a, b)` (`if`), `clamp(x, mín, máx)` |
+| Atajos | `call(k)` = max(P − k, 0), `put(k)` = max(k − P, 0), `digital(k)` = 1 si P ≥ k, `digital_put(k)` = 1 si P < k |
+
+Ejemplos: `max(100%, P)`, `100% + 2*call(110%) - 2*call(130%)`, `si(P >= 70%, 100%, P)`, `1 + 0.5*abs(P - 1)`. Al leer el fichero se comprueba que la fórmula da un valor finito para todo P entre 0% y 1000%; si no (p. ej. `log(P - 1)`), se pide acotarla (`log(max(P, 1%))`). Los errores de escritura se señalan con su posición.
+
+### Réplica estática con opciones
+
+`estructurados replicar producto.json` descompone el producto en una cartera de **bono cupón cero, subyacente, puts, calls y digitales** que, mantenida sin tocar hasta vencimiento, paga lo mismo (Carr y Madan, 1998; es la idea de [TooManyOptions](https://github.com/Serranegra/TooManyOptions): dibujar un pago y replicarlo con opciones). Solo es posible si cada flujo depende únicamente del precio del subyacente en su fecha: un subyacente, sin autocancelación ni barrera desactivante, la barrera de capital (si la hay) observada solo a vencimiento, sin rendimiento medio ni cliquet, y cupones fijos (bonos) o condicionales sin memoria (una digital en cada fecha). Si no, el programa explica por qué.
+
+- **Pagos lineales a trozos** (todas las piezas salvo las fórmulas): la réplica es **exacta**, con opciones en los nodos del pago.
+- **Fórmulas**: se interpola el pago en una rejilla de strikes (`--paso 5%`, `--rango 50%:200%`); el error se mide y se muestra.
+- **Strikes cotizados** (`--cadena opciones.csv`): solo se usan las opciones fuera del dinero que cotizan (puts por debajo del spot, calls por encima), con filtro de liquidez (`--volumen-min 10`, contratos negociados en el día). Pesos por interpolación (exacta en cada strike) o, con `--pesos curvatura`, por la cuadratura de Carr-Madan A''(K)·ΔK que usa TooManyOptions (solo para pagos suaves). Más allá de los strikes extremos, la cartera sigue la pendiente del pago en esos strikes.
+
+Cada pieza se valora con el modelo del subyacente (Black-Scholes cerrado, serie de Merton, Fourier para Heston/Bates/NIG, Hagan para SABR, Monte Carlo para la volatilidad local o con `--precios-mc`) o, con `--cadena`, al precio medio de mercado; con la horquilla se muestra además lo que cuesta montar la cartera (compra al *ask*, venta al *bid*). `--comparar` valora también el producto por simulación: con una réplica exacta, ambos precios coinciden dentro del error estándar.
+
+La **cadena de opciones** es un CSV con cabecera; se reconocen los nombres de columna en español (`vencimiento`, `tipo`, `strike`, `bid`, `ask`, `precio`, `ultimo`, `volumen`, `interes_abierto`, `vol_implicita`) y los de Yahoo Finance / yfinance (`expiration`, `strike`, `bid`, `ask`, `lastPrice`, `volume`, `openInterest`, `impliedVolatility`, y el tipo se deduce de `contractSymbol`). El separador puede ser coma, punto y coma (con coma decimal) o tabulador; las líneas `# clave: valor` aportan `spot`, `fecha` (para convertir vencimientos con fecha en años), `subyacente`, `tipo_interes` y `dividendos`. `herramientas/descargar_cadena.py ^SPX` la descarga de Yahoo Finance en este formato (por defecto solo índices con opciones europeas, como TooManyOptions).
 
 `estructurados mostrar` imprime el **perfil de pago** a vencimiento para P entre 0% y 150% (con y sin barrera tocada), que es la forma más rápida de comprobar que los componentes dicen lo que se quería.
 

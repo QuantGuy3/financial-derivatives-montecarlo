@@ -30,8 +30,75 @@ enum : int { CESTA_PEOR = 0, CESTA_MEJOR = 1, CESTA_MEDIA = 2, CESTA_PONDERADA =
 enum : int { OBS_NINGUNA = 0, OBS_VENCIMIENTO = 1, OBS_FECHAS = 2, OBS_DIARIA = 3, OBS_CONTINUA = 4 };
 enum : int { CUP_FIJO = 0, CUP_CONDICIONAL = 1, CUP_RANGO = 2 };
 enum : int { BLQ_FIJO = 0, BLQ_LINEAL = 1, BLQ_CALL = 2, BLQ_PUT = 3,
-             BLQ_DIGITAL = 4, BLQ_DIGITAL_PUT = 5, BLQ_CLIQUET = 6 };
+             BLQ_DIGITAL = 4, BLQ_DIGITAL_PUT = 5, BLQ_CLIQUET = 6, BLQ_FORMULA = 7 };
 enum : int { COND_SIEMPRE = 0, COND_CON_BARRERA = 1, COND_SIN_BARRERA = 2 };
+
+// ------------------------------------------------------------------------ //
+// Fórmulas de pago: una expresión en P ("max(P - 1, 0)^2", ...) se compila  //
+// en host (expresion.cpp) a instrucciones de una máquina de pila que se     //
+// evalúa aquí, igual en CPU y en GPU. La profundidad de la pila se         //
+// comprueba al compilar, así que la evaluación no necesita comprobaciones. //
+// ------------------------------------------------------------------------ //
+enum : int {
+    FX_CONST = 0, FX_P,                                  // apilan un valor
+    FX_NEG, FX_ABS, FX_EXP, FX_LOG, FX_RAIZ,             // unarias
+    FX_SUMA, FX_RESTA, FX_MUL, FX_DIV, FX_POT, FX_MAX, FX_MIN,   // binarias
+    FX_MAYOR_IGUAL, FX_MAYOR, FX_MENOR_IGUAL, FX_MENOR, FX_IGUAL, FX_DISTINTO,
+    FX_SI                                                // ternaria: si(c, a, b)
+};
+inline constexpr int MAX_PILA_FORMULA = 32;
+
+template<typename Real>
+struct InstrFormula {
+    int  op;
+    Real valor;   // solo FX_CONST
+};
+
+template<typename Real>
+HD_INLINE Real evaluar_formula(const InstrFormula<Real>* cod, int n, Real P) {
+    Real pila[MAX_PILA_FORMULA];
+    int sp = 0;
+    for (int i = 0; i < n; ++i) {
+        const int op = cod[i].op;
+        if (op == FX_CONST) { pila[sp++] = cod[i].valor; continue; }
+        if (op == FX_P)     { pila[sp++] = P; continue; }
+        if (op <= FX_RAIZ) {
+            Real& a = pila[sp - 1];
+            switch (op) {
+                case FX_NEG:  a = -a; break;
+                case FX_ABS:  a = hd::abs_(a); break;
+                case FX_EXP:  a = hd::exp_(a); break;
+                case FX_LOG:  a = hd::log_(a); break;
+                default:      a = hd::sqrt_(a); break;
+            }
+            continue;
+        }
+        if (op == FX_SI) {
+            const Real b = pila[--sp], a = pila[--sp];
+            Real& c = pila[sp - 1];
+            c = (c != Real(0)) ? a : b;
+            continue;
+        }
+        const Real b = pila[--sp];
+        Real& a = pila[sp - 1];
+        switch (op) {
+            case FX_SUMA:        a = a + b; break;
+            case FX_RESTA:       a = a - b; break;
+            case FX_MUL:         a = a * b; break;
+            case FX_DIV:         a = a / b; break;
+            case FX_POT:         a = hd::pow_(a, b); break;
+            case FX_MAX:         a = hd::max_(a, b); break;
+            case FX_MIN:         a = hd::min_(a, b); break;
+            case FX_MAYOR_IGUAL: a = (a >= b) ? Real(1) : Real(0); break;
+            case FX_MAYOR:       a = (a > b) ? Real(1) : Real(0); break;
+            case FX_MENOR_IGUAL: a = (a <= b) ? Real(1) : Real(0); break;
+            case FX_MENOR:       a = (a < b) ? Real(1) : Real(0); break;
+            case FX_IGUAL:       a = (a == b) ? Real(1) : Real(0); break;
+            default:             a = (a != b) ? Real(1) : Real(0); break;
+        }
+    }
+    return sp > 0 ? pila[0] : Real(0);
+}
 
 // Componente de la amortización final (fracción del nominal), función del
 // rendimiento final P de la cesta:
@@ -42,6 +109,7 @@ enum : int { COND_SIEMPRE = 0, COND_CON_BARRERA = 1, COND_SIN_BARRERA = 2 };
 //   DIGITAL     importe · 1{P ≥ strike}
 //   DIGITAL_PUT importe · 1{P < strike}
 //   CLIQUET     part · clamp(Σ_j clamp(P_j/P_{j-1} - 1, suelo_loc, techo_loc), suelo, techo)
+//   FORMULA     f(P), instrucciones [ini, ini+len) de SimProducto::formulas
 template<typename Real>
 struct BloqueSim {
     int  tipo;
@@ -51,6 +119,7 @@ struct BloqueSim {
     Real strike;
     Real suelo;
     Real techo;
+    int  ini, len; // FORMULA
 };
 
 // Vista POD del producto ya "compilado" y de su rejilla temporal. Los punteros
@@ -108,6 +177,7 @@ struct SimProducto {
     int rend_medio;                // 1: P final = media de las observaciones
     int n_bloques;
     const BloqueSim<Real>* bloques;
+    const InstrFormula<Real>* formulas; // código de los componentes FORMULA (o nullptr)
     int  cliquet;
     Real cliq_suelo_loc, cliq_techo_loc;
 };
@@ -215,6 +285,7 @@ HD_INLINE Real amortizacion_final(const SimProducto<Real>& sp, Real P, int ki, R
         case BLQ_DIGITAL:     if (P >= bl.strike) A += bl.importe; break;
         case BLQ_DIGITAL_PUT: if (P < bl.strike) A += bl.importe; break;
         case BLQ_CLIQUET:     A += bl.part * hd::clamp_(cliq, bl.suelo, bl.techo); break;
+        case BLQ_FORMULA:     A += evaluar_formula(sp.formulas + bl.ini, bl.len, P); break;
         default: break;
         }
     }

@@ -302,7 +302,8 @@ void imprimir_resultado(std::ostream& os, const Producto& p, const ResultadoValo
     if (p.ki_obs != OBS_NINGUNA || p.ki_inicial)
         os << "   Probabilidad de tocar la barrera capital  " << porcentaje(r.prob_ki, 1) << "\n";
     bool hay_capital = false;
-    for (const auto& b : p.bloques) hay_capital |= (b.tipo == BLQ_FIJO || b.tipo == BLQ_LINEAL);
+    for (const auto& b : p.bloques)
+        hay_capital |= (b.tipo == BLQ_FIJO || b.tipo == BLQ_LINEAL || b.tipo == BLQ_FORMULA);
     if (hay_capital) {
         os << "   Prob. de amortizar < 100% a vencimiento   " << porcentaje(r.prob_perdida, 1);
         if (r.prob_perdida > 0) os << "   (pérdida media en ese caso: " << porcentaje(r.perdida_media, 1) << ")";

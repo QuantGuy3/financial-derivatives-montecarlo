@@ -7,10 +7,18 @@
 // Los casos deterministas (volatilidad 0, autocancelación segura...) se exigen
 // exactos. Uso: ./test_estructurados [rapido]
 
+#include "estructurados/cotizaciones.hpp"
+#include "estructurados/expresion.hpp"
+#include "estructurados/perfil.hpp"
 #include "estructurados/plan.hpp"
+#include "estructurados/plantillas.hpp"
 #include "estructurados/producto.hpp"
+#include "estructurados/replicacion.hpp"
 #include "estructurados/valoracion.hpp"
+#include "estructurados/vanilla.hpp"
 #include "referencias.hpp"
+
+#include <fstream>
 
 #include <cmath>
 #include <cstdio>
@@ -516,12 +524,282 @@ void test_json_y_errores() {
     }
 }
 
+// ------------------------------------------------------------------------- //
+// Pagos a medida (fórmula y curva), réplica estática y precios vanilla       //
+// ------------------------------------------------------------------------- //
+
+void test_formulas_y_curvas() {
+    // La misma call escrita como bloques, como curva y como fórmula: con la misma
+    // semilla las trayectorias son idénticas, así que los precios coinciden exactamente
+    const std::string modelo = R"J({"tipo": "heston", "vol_inicial": 0.2, "kappa": 1.5, "vol_largo_plazo": 0.22, "xi": 0.5, "rho": -0.6})J";
+    auto precio = [&](const std::string& comp) {
+        return mc(compilar_texto(un_activo(modelo, 0.01, 1.0, 0.03, "\"amortizacion_final\": " + comp)), 20000).precio;
+    };
+    const double base = precio(R"J([{"tipo": "fijo"}, {"tipo": "call", "strike": "100%", "participacion": "80%"}, {"tipo": "digital", "strike": "120%", "importe": "5%"}])J");
+    exacto("Curva por puntos = bloques equivalentes",
+           precio(R"J([{"tipo": "curva", "puntos": [["0%", "100%"], ["100%", "100%"], ["120%", "116%"], ["120%", "121%"], ["200%", "185%"]], "extrapolacion": "lineal"}])J"),
+           base, 1e-12);
+    exacto("Fórmula = bloques equivalentes",
+           precio(R"J([{"tipo": "formula", "expresion": "100% + 80% * max(P - 1, 0) + 5% * (P >= 1.2)"}])J"), base, 1e-12);
+    exacto("Fórmula con atajos call() y digital()",
+           precio(R"J([{"tipo": "formula", "expresion": "1 + 0.8 * call(100%) + 5% * digital(120%)"}])J"), base, 1e-12);
+    exacto("Fórmula con S (precio) en un solo subyacente",
+           precio(R"J([{"tipo": "formula", "expresion": "1 + 0.8 * max(S - 100, 0) / 100 + 0.05 * si(S >= 120, 1, 0)"}])J"), base, 1e-12);
+
+    // Evaluación directa: precedencias y funciones
+    auto f = [](const std::string& t, double P) { return evaluar(compilar_formula(t), P); };
+    exacto("Fórmula: -P^2 = -(P^2) y potencias a la derecha", f("-P^2 + 2^3^2", 3.0), -9.0 + 512.0);
+    exacto("Fórmula: clamp, abs, si, porcentajes y pb", f("clamp(P, 50%, 150%) + abs(P - 2) + si(P < 1, 1, 25pb)", 2.0),
+           1.5 + 0.0 + 0.0025);
+    exacto("Fórmula: max y min con varios argumentos", f("max(1, P, 3) - min(P, 0.5, 2)", 2.0), 3.0 - 0.5);
+    auto error_formula = [](const std::string& t, const std::string& frag) {
+        std::string msg;
+        try { Formula fo = compilar_formula(t); comprobar_finita(fo); } catch (const ErrorFormula& e) { msg = e.what(); }
+        resultado(msg.find(frag) != std::string::npos, "Error de fórmula: " + t, msg.empty() ? "sin error" : "");
+    };
+    error_formula("max(P - 1, 0", "se esperaba");
+    error_formula("2P", "falta un operador");
+    error_formula("maxi(P, 1)", "desconocida");
+    error_formula("log(P - 1)", "no da un valor finito");
+    error_formula("S - 1", "un único subyacente");
+    error_formula("max(P)", "al menos 2");
+
+    // Validación de respuestas del asistente (fórmula y lista de puntos)
+    {
+        Pregunta qf{"f", "", "", TipoDato::Formula, "", {}, ""};
+        Pregunta qp{"p", "", "", TipoDato::Puntos, "", {}, ""};
+        std::string can, err;
+        bool a = normalizar_respuesta(qf, "100% + 2*call(110%) - 2*call(130%)", can, err);
+        bool b = !normalizar_respuesta(qf, "max(P 1)", can, err) && !normalizar_respuesta(qf, "log(P-1)", can, err);
+        bool c = normalizar_respuesta(qp, "0:90 90:90 100:100 130:130 130:135 200:135", can, err) &&
+                 can == "0%:90% 90%:90% 100%:100% 130%:130% 130%:135% 200%:135%";
+        bool d = !normalizar_respuesta(qp, "100:100 90:90", can, err) && !normalizar_respuesta(qp, "100-100", can, err);
+        resultado(a && b && c && d, "Asistente: valida fórmulas y listas de puntos", "");
+        // Plantillas nuevas: generan productos válidos
+        bool ok = true;
+        for (const char* id : {"pago_a_medida", "pago_por_puntos"}) {
+            const Plantilla* pl = buscar_plantilla(id);
+            try { compilar(construir_producto(*pl, comunes_por_defecto(*pl), {})); } catch (...) { ok = false; }
+        }
+        resultado(ok, "Plantillas pago_a_medida y pago_por_puntos", "");
+    }
+}
+
+void test_replica_estatica() {
+    // Réplica exacta de una call: su valor es Black-Scholes
+    {
+        Producto p = compilar_texto(un_activo(BS25, 0.02, 1.5, 0.03, R"J("nominal": 100, "amortizacion_final": [{"tipo": "call", "strike": "110%"}])J"));
+        Replica r = replicar(p, OpcionesReplica{});
+        exacto("Réplica de una call = Black-Scholes", r.valor, ref::bs_precio(true, 100, 110, 1.5, 0.03, 0.02, 0.25), 1e-9);
+        resultado(r.exacta && r.lineas.size() == 1 && r.lineas[0].instrumento == "Call", "Réplica de una call: una sola call", "");
+    }
+    // Reverse convertible con barrera a vencimiento y digital: réplica exacta frente a la fórmula cerrada
+    {
+        const double S = 100, r_ = 0.03, q = 0.01, T = 1.0, s = 0.25, B = 0.7;
+        Producto p = compilar_texto(un_activo(BS25, q, T, r_, R"J("nominal": 100, "barrera_capital": {"nivel": "70%", "observacion": "vencimiento"},
+            "amortizacion_final": [{"tipo": "fijo"}, {"tipo": "put_vendida", "strike": "100%", "condicion": "barrera_tocada"},
+                                   {"tipo": "digital", "strike": "120%", "importe": "5%"}])J"));
+        Replica rp = replicar(p, OpcionesReplica{});
+        // A = 1 - (1-P)·1{P≤B} + 5%·1{P≥1.2}: E[(1-P)1{P≤B}] = Put(K=B) + (1-B)·Digital_put(B)
+        double ref = std::exp(-r_ * T) - (ref::bs_precio(false, S, B * S, T, r_, q, s) / S +
+                                         (1 - B) * ref::bs_digital(false, S, B * S, T, r_, q, s)) +
+                     0.05 * ref::bs_digital(true, S, 120, T, r_, q, s);
+        exacto("Réplica: reverse convertible con barrera europea", rp.valor / 100.0, ref, 1e-9);
+        resultado(rp.exacta && rp.error_max < 1e-12, "Réplica exacta: error del pago nulo", "");
+        auto m = mc(p, 400000);
+        comparar("Réplica frente a simulación (BS)", m.precio, m.error, rp.valor / 100.0, 0.0);
+    }
+    // Heston con cupones fijos y condicionales sin memoria: digitales en cada fecha (Fourier)
+    {
+        Producto p = compilar_texto(un_activo(R"J({"tipo": "heston", "vol_inicial": 0.2, "kappa": 2, "vol_largo_plazo": 0.22, "xi": 0.6, "rho": -0.7})J",
+            0.025, 1.0, 0.03, R"J("nominal": 100, "observaciones": {"frecuencia": "trimestral"},
+            "cupones": [{"tipo": "fijo", "tasa_anual": "4%"}, {"tipo": "condicional", "importe": "1%", "barrera": "90%"}],
+            "barrera_capital": {"nivel": "70%", "observacion": "vencimiento"},
+            "amortizacion_final": [{"tipo": "fijo"}, {"tipo": "put_vendida", "strike": "100%", "condicion": "barrera_tocada"}],
+            "simulacion": {"pasos_por_anio": 250})J"));
+        Replica rp = replicar(p, OpcionesReplica{});
+        auto m = mc(p, 400000);
+        comparar("Réplica (Fourier) frente a simulación (Heston, cupones)", m.precio, m.error, rp.valor / 100.0, 0.0006);
+    }
+    // Fórmula suave: la rejilla converge al valor exacto de E[(P-1)²]
+    {
+        const double r_ = 0.03, q = 0.015, s = 0.2, T = 1.0;
+        Producto p = compilar_texto(un_activo(R"J({"tipo": "black_scholes", "volatilidad": 0.2})J", q, T, r_,
+            R"J("nominal": 1, "amortizacion_final": [{"tipo": "formula", "expresion": "100% + 50% * (P - 1)^2"}])J"));
+        double EP = std::exp((r_ - q) * T), EP2 = std::exp(2 * (r_ - q) * T + s * s * T);
+        double ref = std::exp(-r_ * T) * (1 + 0.5 * (EP2 - 2 * EP + 1));
+        OpcionesReplica o;
+        o.paso = 0.01;
+        o.p_min = 0.01;
+        o.p_max = 4.0;
+        Replica rp = replicar(p, o);
+        exacto("Réplica en rejilla de 1% de un pago cuadrático", rp.valor, ref, 2e-5);
+    }
+    // No replicables: autocancelable, barrera continua, memoria
+    {
+        auto motivo = [](const std::string& texto) {
+            std::string m;
+            es_replicable(compilar_texto(texto), &m);
+            return m;
+        };
+        std::string a = motivo(un_activo(BS25, 0, 1, 0.02, R"J("observaciones": {"frecuencia": "semestral"}, "autocancelacion": {"barrera": "100%"}, "amortizacion_final": [{"tipo": "fijo"}])J"));
+        std::string b = motivo(un_activo(BS25, 0, 1, 0.02, R"J("barrera_capital": {"nivel": "60%", "observacion": "continua"}, "amortizacion_final": [{"tipo": "fijo"}, {"tipo": "put_vendida", "condicion": "barrera_tocada"}])J"));
+        resultado(a.find("autocancelable") != std::string::npos && b.find("continua") != std::string::npos,
+                  "Réplica: detecta los productos que dependen de la trayectoria", "");
+    }
+}
+
+void test_vanilla_y_vol_implicita() {
+    Activo a;
+    a.nombre = "X";
+    a.spot = a.nivel_inicial = 100;
+    a.dividendos = 0.01;
+    Curva c;
+    c.t = {1.0};
+    c.r = {0.03};
+    // Fourier con control Black-Scholes frente a la integral de referencia
+    a.modelo = compilar_texto(un_activo(R"J({"tipo": "heston", "vol_inicial": 0.2, "kappa": 1.5, "vol_largo_plazo": 0.25, "xi": 0.7, "rho": -0.7})J",
+                                        0.01, 1, 0.03, R"J("amortizacion_final": [{"tipo": "fijo"}])J")).activos[0].modelo;
+    {
+        PreciosVanilla pv(a, c);
+        double peor = 0, peor_put = 0, peor_dig = 0;
+        for (double T : {0.1, 1.0, 3.0})
+            for (double K : {60.0, 90.0, 100.0, 115.0, 160.0}) {
+                double v0 = 0.04, th = 0.0625;
+                auto phi = ref::fc_heston(v0, 1.5, th, 0.7, -0.7, T);
+                double cr = ref::precio_fourier(true, phi, 100, K, T, 0.03, 0.01);
+                double pr = ref::precio_fourier(false, phi, 100, K, T, 0.03, 0.01);
+                peor = std::max(peor, std::fabs(pv.call(T, K) - cr));
+                peor_put = std::max(peor_put, std::fabs(pv.put(T, K) - pr));
+                double h = 1e-4 * K;
+                double dig_fd = (ref::precio_fourier(true, phi, 100, K - h, T, 0.03, 0.01) -
+                                 ref::precio_fourier(true, phi, 100, K + h, T, 0.03, 0.01)) / (2 * h);
+                peor_dig = std::max(peor_dig, std::fabs(pv.digital(T, K) - dig_fd));
+            }
+        char buf[160];
+        std::snprintf(buf, sizeof buf, "máx |dif| call %.2e, put %.2e, digital %.2e", peor, peor_put, peor_dig);
+        resultado(peor < 1e-7 && peor_put < 1e-7 && peor_dig < 1e-7, "Fourier (Lewis + control BS): Heston", buf);
+    }
+    // Monte Carlo vanilla (forzado) frente a Black-Scholes
+    {
+        a.modelo = compilar_texto(un_activo(BS25, 0.01, 1, 0.03, R"J("amortizacion_final": [{"tipo": "fijo"}])J")).activos[0].modelo;
+        OpcionesMCVanilla om;
+        om.trayectorias = (long long)std::max(20000.0, 400000 * g_escala);
+        PreciosVanilla pv(a, c, om, true);
+        pv.preparar({0.5, 2.0});
+        double peor = 0;
+        for (double T : {0.5, 2.0})
+            for (double K : {80.0, 100.0, 125.0}) {
+                double e = std::fabs(pv.call(T, K) - ref::bs_precio(true, 100, K, T, 0.03, 0.01, 0.25)) / (0.5 + K * 0.0);
+                peor = std::max(peor, e);
+                double paridad = pv.call(T, K) - pv.put(T, K) - (100 * std::exp(-0.01 * T) - K * std::exp(-0.03 * T));
+                peor = std::max(peor, std::fabs(paridad) * 1e3);
+            }
+        resultado(peor < 0.3 * std::sqrt(0.1 / g_escala) + 1e-9, "Vanilla por Monte Carlo: Black-Scholes y paridad", "");
+    }
+    // Volatilidad implícita: ida y vuelta en todo el plano strike/plazo, calls y puts
+    {
+        double peor = 0;
+        int fallos = 0;
+        for (double T : {0.02, 0.25, 1.0, 5.0})
+            for (double K : {30.0, 70.0, 95.0, 100.0, 105.0, 140.0, 300.0})
+                for (double s : {0.05, 0.2, 0.8})
+                    for (bool call : {true, false}) {
+                        double pr = ref::bs_precio(call, 100, K, T, 0.03, 0.01, s);
+                        // El valor temporal (la opción fuera del dinero equivalente) debe ser
+                        // apreciable frente al precio: si no, el precio no contiene la volatilidad
+                        double F = 100 * std::exp(0.02 * T);
+                        double otm = ref::bs_precio(K > F, 100, K, T, 0.03, 0.01, s);
+                        if (otm < 1e-10 * std::max(pr, 1.0)) continue;
+                        bool ok = false;
+                        double v = vol_implicita(pr, call, 100, K, T, 0.03, 0.01, &ok);
+                        if (!ok) { ++fallos; continue; }
+                        peor = std::max(peor, std::fabs(v - s));
+                    }
+        char buf[120];
+        std::snprintf(buf, sizeof buf, "máx |error| %.2e, fallos %d", peor, fallos);
+        resultado(peor < 1e-6 && fallos == 0, "Volatilidad implícita: ida y vuelta", buf);
+        bool ok = true;
+        vol_implicita(0.0, true, 100, 120, 1, 0.03, 0, &ok);
+        bool ok2 = true;
+        vol_implicita(200.0, true, 100, 120, 1, 0.03, 0, &ok2);
+        resultado(!ok && !ok2, "Volatilidad implícita: rechaza precios imposibles", "");
+    }
+}
+
+void test_cadenas_csv() {
+    // Formato de Yahoo Finance (tipo deducido del símbolo, fechas) y formato español
+    // (punto y coma, coma decimal, plazos y volatilidad en puntos porcentuales)
+    {
+        std::ofstream f("prueba_cadena_yf.csv");
+        f << "# fecha: 2026-01-01\n# spot: 5600\n"
+             "contractSymbol,strike,lastPrice,bid,ask,volume,openInterest,impliedVolatility,expiration\n"
+             "SPXW270101P05000000,5000,100.5,100,101,12,500,0.25,2027-01-01\n"
+             "SPXW270101C06000000,6000,80.0,79,81,,300,0.18,2027-01-01\n"
+             "SPXW270101C06500000,6500,30.0,29.5,30.5,25,200,0.17,2027-01-01\n";
+    }
+    {
+        std::ofstream f("prueba_cadena_es.csv");
+        f << "# subyacente: SX5E\nvencimiento;tipo;strike;precio;volumen;vol_implicita\n"
+             "6M;put;4500;95,25;10;22,5\n6M;call;5000;80,5;0;18\n1A;call;5200;120;7;19,1%\n";
+    }
+    CadenaOpciones yf = leer_cadena_csv("prueba_cadena_yf.csv");
+    CadenaOpciones es = leer_cadena_csv("prueba_cadena_es.csv");
+    bool ok_yf = yf.cot.size() == 3 && !yf.cot[0].call && yf.cot[1].call && std::fabs(yf.cot[0].T - 1.0) < 1e-12 &&
+                 std::fabs(yf.cot[0].referencia() - 100.5) < 1e-12 && yf.cot[1].volumen < 0 && yf.spot == 5600;
+    bool ok_es = es.cot.size() == 3 && std::fabs(es.cot[0].T - 0.5) < 1e-12 && std::fabs(es.cot[0].precio - 95.25) < 1e-12 &&
+                 std::fabs(es.cot[0].vol - 0.225) < 1e-12 && std::fabs(es.cot[2].vol - 0.191) < 1e-12;
+    resultado(ok_yf, "Cadena CSV: formato de Yahoo Finance", "");
+    resultado(ok_es, "Cadena CSV: punto y coma, coma decimal y plazos", "");
+    auto st = strikes_fuera_del_dinero(yf, 1.0, 5600, 10, 0, 1e9);
+    resultado(st.size() == 2 && st[0].K == 5000 && st[1].K == 6500, "Cadena: filtro fuera del dinero y volumen mínimo", "");
+    std::remove("prueba_cadena_yf.csv");
+    std::remove("prueba_cadena_es.csv");
+
+    // Réplica con strikes cotizados: exacta en cada strike
+    {
+        std::ofstream f("prueba_cadena_k.csv");
+        f << "vencimiento,tipo,strike,precio\n";
+        for (int K = 60; K <= 160; K += 10) f << "1A," << (K < 100 ? "put" : "call") << "," << K << ",1\n";
+    }
+    CadenaOpciones ck = leer_cadena_csv("prueba_cadena_k.csv");
+    std::remove("prueba_cadena_k.csv");
+    Producto p = compilar_texto(un_activo(BS25, 0, 1, 0.02, R"J("amortizacion_final": [{"tipo": "formula", "expresion": "1 + 0.5 * (P - 1)^2"}])J"));
+    OpcionesReplica o;
+    o.cadena = &ck;
+    Replica r = replicar(p, o);
+    // Pago de la cartera reconstruido a partir de sus líneas (pesos en P)
+    auto cartera = [&](double P) {
+        double v = 0;
+        for (const auto& l : r.lineas) {
+            if (l.instrumento == "Bono cupón cero") v += l.peso;
+            else if (l.instrumento.rfind("Subyacente", 0) == 0) v += l.peso * P;
+            else if (l.instrumento == "Put") v += l.peso * std::max(l.k - P, 0.0);
+            else if (l.instrumento == "Call") v += l.peso * std::max(P - l.k, 0.0);
+        }
+        return v;
+    };
+    double peor = 0;
+    for (int K = 60; K <= 160; K += 10) {
+        if (K == 100) continue; // en el dinero: no se usa (solo opciones fuera del dinero)
+        double P = K / 100.0;
+        peor = std::max(peor, std::fabs(cartera(P) - (1 + 0.5 * (P - 1) * (P - 1))));
+    }
+    char buf[80];
+    std::snprintf(buf, sizeof buf, "máx |dif| = %.2e", peor);
+    resultado(peor < 1e-12 && r.lineas.size() == 11, "Réplica con strikes cotizados: exacta en los strikes", buf);
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
     if (argc > 1 && std::strcmp(argv[1], "rapido") == 0) g_escala = 0.1;
     std::printf("== Tests del motor de productos estructurados (CPU) ==\n");
     test_json_y_errores();
+    test_formulas_y_curvas();
+    test_replica_estatica();
+    test_vanilla_y_vol_implicita();
+    test_cadenas_csv();
     test_deterministas();
     test_black_scholes();
     test_modelos();

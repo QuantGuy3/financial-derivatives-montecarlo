@@ -143,6 +143,7 @@ void imprimir_ficha(std::ostream& os, const Producto& p) {
        << ":\n";
     if (p.bloques.empty()) os << "   (no hay pago final)\n";
     for (const auto& b : p.bloques) {
+        if (b.oculto) continue; // piezas internas de una curva (se describe en su primer bloque)
         bool neg = !b.descripcion.empty() && b.descripcion[0] == '-';
         os << "   " << (neg ? b.descripcion : "+ " + b.descripcion) << condicion(b.cond) << "\n";
     }
@@ -154,11 +155,13 @@ void imprimir_ficha(std::ostream& os, const Producto& p) {
             BloqueSim<double> x{};
             x.tipo = b.tipo; x.cond = b.cond; x.importe = b.importe; x.part = b.part;
             x.strike = b.strike; x.suelo = b.suelo; x.techo = b.techo;
+            x.ini = b.formula_ini; x.len = b.formula_len;
             bs.push_back(x);
         }
         SimProducto<double> sp{};
         sp.n_bloques = (int)bs.size();
         sp.bloques = bs.data();
+        sp.formulas = p.formulas.empty() ? nullptr : p.formulas.data();
         bool dos = (p.ki_obs != OBS_NINGUNA);
         os << "\n Perfil de pago a vencimiento (sin cupones" << (p.indice_cliquet() >= 0 ? "; cliquet acumulado = 0" : "")
            << ")\n   " << col("P final", 10) << (dos ? col("Sin tocar barrera", 20) + "Barrera tocada" : std::string("Amortización"))

@@ -30,6 +30,7 @@ struct PlanSim {
     std::vector<int>  ac_activa;
     std::vector<Real> ac_bar, ac_imp;
     std::vector<BloqueSim<Real>> bloques;
+    std::vector<InstrFormula<Real>> formulas;
     SimProducto<Real> vista{};
     double pasos_por_anio = 0.0;
 
@@ -59,6 +60,7 @@ struct PlanSim {
         vista.ac_bar = ac_bar.empty() ? nullptr : ac_bar.data();
         vista.ac_imp = ac_imp.empty() ? nullptr : ac_imp.data();
         vista.bloques = bloques.empty() ? nullptr : bloques.data();
+        vista.formulas = formulas.empty() ? nullptr : formulas.data();
     }
 };
 
@@ -248,6 +250,8 @@ std::unique_ptr<PlanSim<Real>> construir_plan(const Producto& p) {
         bs.strike = (Real)b.strike;
         bs.suelo = (Real)b.suelo;
         bs.techo = (Real)b.techo;
+        bs.ini = b.formula_ini;
+        bs.len = b.formula_len;
         P.bloques.push_back(bs);
         if (b.tipo == BLQ_CLIQUET) {
             v.cliquet = 1;
@@ -256,6 +260,7 @@ std::unique_ptr<PlanSim<Real>> construir_plan(const Producto& p) {
         }
     }
     v.n_bloques = (int)P.bloques.size();
+    for (const auto& ins : p.formulas) P.formulas.push_back(InstrFormula<Real>{ins.op, (Real)ins.valor});
 
     P.enlazar();
     return plan;

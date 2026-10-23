@@ -163,6 +163,8 @@ private:
             case TipoDato::Plazo:       out_ << "     · plazo: 3A (años), 18M (meses), 26S (semanas), 2.5 (años)\n"; break;
             case TipoDato::Frecuencia:  out_ << "     · mensual, bimestral, trimestral, cuatrimestral, semestral, anual o 3M, 6M...\n"; break;
             case TipoDato::Observacion: out_ << "     · vencimiento | fechas | diaria | continua\n"; break;
+            case TipoDato::Formula:     out_ << "     · fórmula en P (1 = 100%): + - * / ^ max min abs exp log sqrt si call put digital\n"; break;
+            case TipoDato::Puntos:      out_ << "     · puntos P:pago en %, separados por espacios: 0:90 100:100 150:120\n"; break;
             case TipoDato::SiNo:        out_ << "     · s / n\n"; break;
             case TipoDato::Opcion: {
                 out_ << "     · opciones:";

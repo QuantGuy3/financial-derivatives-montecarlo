@@ -2,7 +2,7 @@
 
 Motor de valoración de derivados financieros en C++/CUDA, pensado para GPUs NVIDIA (objetivo `sm_80`, A100) con `cuRAND`, `cuBLAS` y `CUB`. Implementa cuatro familias de estimadores — Monte Carlo estándar (MC), Quasi-Monte Carlo (QMC), Multilevel Monte Carlo (MLMC) y Multilevel Quasi-Monte Carlo (MLQMC) — sobre ocho modelos de precio (GBM, Heston, Dupire local, cestas multi-activo, Merton, Bates, SABR y NIG) y varios payoffs (europeas, asiáticas, lookback, barrera, basket), con soporte de reducción de varianza (variables de control, importance sampling) y de técnicas de reducción de dimensión efectiva (Brownian Bridge, PCA con Tensor Cores).
 
-Incluye además un **módulo de productos estructurados** (autocallables Phoenix y Athena, reverse convertibles, notas con capital protegido, certificados bonus, twin-win, shark fin, range accrual, cliquets y cualquier combinación de sus piezas) sobre cestas de hasta 16 subyacentes, cada uno con su propio modelo. Los productos se definen con un asistente interactivo o con plantillas, se guardan en ficheros JSON legibles y se valoran en GPU (MC o QMC) o en CPU; ver [Productos estructurados](#productos-estructurados).
+Incluye además un **módulo de productos estructurados** (autocallables Phoenix y Athena, reverse convertibles, notas con capital protegido, certificados bonus, twin-win, shark fin, range accrual, cliquets y cualquier combinación de sus piezas) sobre cestas de hasta 16 subyacentes, cada uno con su propio modelo. Los productos se definen con un asistente interactivo o con plantillas, se guardan en ficheros JSON legibles y se valoran en GPU (MC o QMC) o en CPU; ver [Productos estructurados](#productos-estructurados). Cualquier pago a vencimiento, también dibujado a mano o escrito como fórmula, se puede descomponer en una cartera estática de bono, subyacente y opciones y valorar con los modelos o con precios de mercado; ver [Réplica estática](#réplica-estática-con-opciones-idea-de-toomanyoptions).
 
 ## Los cuatro métodos
 
@@ -48,6 +48,7 @@ Los cuatro modelos nuevos funcionan con los cuatro métodos (MC, QMC, MLMC, MLQM
 ./build/estructurados plantilla phoenix mi.json    # plantilla lista para editar (ver: estructurados plantillas)
 ./build/estructurados mostrar mi.json              # valida y muestra la ficha con el perfil de pago
 ./build/estructurados valorar mi.json --griegas    # valora (GPU si hay; si no, CPU) y calcula sensibilidades
+./build/estructurados replicar mi.json --comparar  # réplica estática con bono, subyacente y opciones
 ```
 
 **Definición.** Un producto es un fichero JSON con las secciones de una ficha de producto: mercado (tipo plano o curva), subyacentes (spot, nivel inicial, dividendos y modelo), correlación, cesta (peor, mejor, media o ponderada), calendario de observación, cupones (fijos, condicionales con o sin memoria, *range accrual*), autocancelación (con *step-down* y primas acumuladas), barrera de capital y barrera desactivante (observadas a vencimiento, en fechas, diariamente o de forma continua con corrección BGK) y la amortización final como suma de componentes (fijo, lineal, call, put, put vendida, digitales y cliquet, condicionados o no a la barrera). Los porcentajes se escriben como `"60%"`, los plazos como `"18M"` o `"3A"`, y se admiten fechas reales para productos ya vivos. La referencia completa está en [`estructurados/FORMATO.md`](estructurados/FORMATO.md) y en `productos/` hay un ejemplo de cada familia.
@@ -76,9 +77,34 @@ Los cuatro modelos nuevos funcionan con los cuatro métodos (MC, QMC, MLMC, MLQM
 
 **Facilidad de uso.** El asistente (`estructurados nuevo`) ofrece las plantillas habituales (o la construcción pieza a pieza), propone valores por defecto, explica cada dato con `?`, valida cada respuesta al momento (rangos, matriz de correlación válida, parámetros compatibles) y, antes de guardar, muestra la ficha: calendario con barreras y cupones por fecha, y el perfil de pago a vencimiento con y sin barrera tocada. Al leer un fichero, los errores indican la clave y la línea, y las erratas en las claves se avisan con una sugerencia («¿quería decir "observacion"?»).
 
+**Pagos a medida.** Además de las piezas habituales, el pago a vencimiento puede ser una **curva por puntos** (`{"tipo": "curva", "puntos": [["0%", "90%"], ["100%", "100%"], ["130%", "135%"]]}`, lo que guarda el diseñador al dibujar el pago) o una **fórmula** en el rendimiento P (`{"tipo": "formula", "expresion": "100% + 50% * max(P - 1, 0)^2"}`, con `max`, `min`, `abs`, `exp`, `log`, `sqrt`, `si(c,a,b)`, `call(k)`, `put(k)`, `digital(k)`...). La curva se descompone de forma exacta en piezas elementales; la fórmula se compila a un pequeño código de pila que evalúan igual la CPU y la GPU. Plantillas: `pago_a_medida` y `pago_por_puntos`.
+
 **Modelos por subyacente.** `black_scholes`, `heston`, `merton`, `bates`, `vol_local` (paramétrica tipo Dupire/CEV), `sabr` y `nig`; cada subyacente puede llevar uno distinto y la correlación se aplica a sus brownianos principales (`estructurados modelos` lista los parámetros).
 
 **Valoración.** El núcleo que simula una trayectoria y evalúa el producto (`estructurados/simulacion_hd.hpp`) es código `__host__ __device__`: el mismo lo ejecutan el kernel CUDA (un hilo por trayectoria, ruido generado en el propio hilo con Philox o Sobol + scrambling de Hong-Hickernell, sin buffers de ruido en memoria global) y el motor CPU multihilo de doble precisión. Con la misma semilla ambos recorren las mismas trayectorias. El número de trayectorias se adapta al error estándar objetivo (MC: piloto + N = Var/error²; QMC: duplicación de puntos con 16 réplicas). El informe incluye la descomposición del valor (cupones, amortización anticipada y final), probabilidades de autocancelación por fecha, vida media, probabilidad de tocar la barrera y de pérdida, y con `--griegas` delta, gamma, vega y rho por diferencias finitas con números aleatorios comunes.
+
+## Réplica estática con opciones (idea de TooManyOptions)
+
+```bash
+./build/estructurados replicar productos/pago_dibujado_bonus.json --comparar
+./build/estructurados replicar productos/pago_formula_cuadratico.json --cadena productos/cadena_ejemplo_spx.csv --volumen-min 10
+python herramientas/descargar_cadena.py ^SPX -o spx.csv     # cadena real de Yahoo Finance (yfinance)
+```
+
+Inspirada en [TooManyOptions](https://github.com/Serranegra/TooManyOptions) («dibuja cualquier pago y replícalo con opciones», licencia MIT), que aplica la descomposición de Carr y Madan (1998):
+
+  A(S_T) = A(S₀) − S₀A'(S₀) + A'(S₀)·S_T + ∫₀^{S₀} A''(K)·(K − S_T)⁺ dK + ∫_{S₀}^∞ A''(K)·(S_T − K)⁺ dK
+
+Aquí está integrada en el programa y ampliada:
+
+- **Se dibuja en el diseñador** (plantilla *Pago dibujado*): trazo a mano alzada con suavizado, nodos que se arrastran o se escriben, y un panel con la cartera réplica (bono, subyacente, puts, calls y digitales) y su valor con Black-Scholes. El pago dibujado se guarda como componente `curva` y se puede valorar con cualquier modelo.
+- **Réplica exacta** cuando el pago es lineal a trozos (todas las piezas salvo las fórmulas): opciones en los nodos del pago, digitales en los saltos y error nulo. Con fórmulas, rejilla de strikes configurable y error medido.
+- **Productos completos, no solo un pago**: también los cupones fijos (bonos cupón cero) y los condicionales sin memoria (una digital en cada fecha), y la barrera de capital observada a vencimiento. Si el producto depende de la trayectoria (autocancelable, barreras continuas, memoria, asiático...), el programa explica por qué no admite réplica estática.
+- **Valoración de la cartera** con el modelo del subyacente (Fourier, serie de Merton, Hagan o Monte Carlo) o con precios de mercado de una cadena real; `--comparar` la contrasta con la simulación del producto: con una réplica exacta coinciden dentro del error estándar.
+- **Strikes cotizados** como en TooManyOptions: solo opciones fuera del dinero, con filtro de volumen mínimo; los pesos se calculan por interpolación (exacta en cada strike) o por la cuadratura de curvatura de Carr-Madan (`--pesos curvatura`), y con la horquilla se muestra el coste de montar y deshacer la cartera.
+- `herramientas/descargar_cadena.py` descarga la cadena de Yahoo Finance en el CSV que lee el programa (por defecto, solo índices con opciones europeas: ^SPX, ^XSP, ^NDX, ^NQX, ^RUT, ^DJX).
+
+Los detalles del formato, de la cadena CSV y de las opciones de `replicar` están en [`estructurados/FORMATO.md`](estructurados/FORMATO.md#réplica-estática-con-opciones).
 
 **Validación.** `tests/test_estructurados.cpp` contrasta el motor con precios cerrados o semianalíticos: casos deterministas exactos (cupón cero, bono con curva, memoria, range accrual, cliquet, autocancelación), Black-Scholes (call, put, digital, reverse convertible, put down-and-in continua frente a Reiner-Rubinstein, shark fin), los siete modelos (Fourier, serie de Merton, Hagan, martingala), cestas worst-of/best-of frente a la normal bivariante, QMC y la equivalencia precisión simple/doble. Si hay GPU, compara además GPU y CPU trayectoria a trayectoria.
 
@@ -100,9 +126,10 @@ Sin `nvcc` (o con `-DMC_USAR_CUDA=OFF`) se compila igualmente la parte CPU: el p
 - `methods_cuda.cuh` / `methods_cuda.cu`: implementación GPU de los cuatro métodos (`run_mc_cuda`, `run_qmc_cuda`, `run_mlmc_cuda`, `run_mlqmc_cuda`), variables de control e importance sampling.
 - `hd_comun.hpp` / `modelos_hd.hpp`: código compartido CPU/GPU — Philox4x32-10, Sobol con scrambling de Hong-Hickernell, inversa de la normal y los pasos de los siete modelos de subyacente.
 - `referencias.hpp` / `referencias.cpp`: precios de referencia (Black-Scholes con dividendos, digitales y barreras, Merton, Fourier para Heston/Bates/NIG, Hagan para SABR, normal bivariante).
-- `estructurados/`: módulo de productos estructurados — lectura/escritura JSON (`json.*`), definición y validación (`producto.*`), ficha (`ficha.cpp`), plantillas y asistente (`plantillas.*`, `asistente.*`), núcleo de simulación (`simulacion_hd.hpp`, `plan.hpp`), motores CPU y GPU (`motor_cpu.cpp`, `motor_gpu.cu`), valoración y griegas (`valoracion.*`), programa `estructurados` (`main.cpp`) y la referencia del formato (`FORMATO.md`).
-- `herramientas/disenador_productos.html`: diseñador visual de productos (HTML autocontenido) que genera el JSON.
-- `productos/`: productos de ejemplo en JSON (Phoenix, Athena, reverse convertible, capital protegido, bonus, twin-win, shark fin, range accrual, cliquet, opción europea y un autocallable vivo con fechas reales).
+- `estructurados/`: módulo de productos estructurados — lectura/escritura JSON (`json.*`), definición y validación (`producto.*`), fórmulas de pago (`expresion.*`), ficha (`ficha.cpp`), plantillas y asistente (`plantillas.*`, `asistente.*`), núcleo de simulación (`simulacion_hd.hpp`, `plan.hpp`), motores CPU y GPU (`motor_cpu.cpp`, `motor_gpu.cu`), valoración y griegas (`valoracion.*`), precios de opciones europeas por modelo y volatilidad implícita (`vanilla.*`), cadenas de opciones en CSV (`cotizaciones.*`), perfiles lineales a trozos y su descomposición de Carr-Madan (`perfil.*`), réplica estática (`replicacion.*`), programa `estructurados` (`main.cpp`) y la referencia del formato (`FORMATO.md`).
+- `herramientas/disenador_productos.html`: diseñador visual de productos (HTML autocontenido) que genera el JSON; incluye el dibujo del pago y su réplica estática.
+- `herramientas/descargar_cadena.py`: descarga una cadena de opciones de Yahoo Finance (yfinance) al CSV que lee el programa.
+- `productos/`: productos de ejemplo en JSON (Phoenix, Athena, reverse convertible, capital protegido, bonus, twin-win, shark fin, range accrual, cliquet, opción europea, un autocallable vivo con fechas reales, un pago dibujado y uno con fórmula) y una cadena de opciones sintética (`cadena_ejemplo_spx.csv`) para probar la réplica con strikes cotizados.
 - `examples/`: 15 ejemplos ejecutables (`ejemplo01`…`ejemplo15`) que cubren europea, asiática, lookback, barrera, Heston, Dupire, cestas correlacionadas/no correlacionadas, variables de control, importance sampling, Merton, Bates, SABR y NIG.
 - `tests/`: tests del módulo de productos estructurados.
 - `colab_build.sh`: script de compilación pensado para un entorno Google Colab con GPU.

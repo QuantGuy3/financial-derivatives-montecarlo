@@ -1,6 +1,9 @@
 #include "producto.hpp"
+#include "expresion.hpp"
+#include "perfil.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
@@ -688,7 +691,7 @@ Bloque leer_bloque(const Nodo& nb) {
     Bloque b;
     std::string tipo = normalizar(nb.campo("tipo").texto(""));
     if (tipo.empty()) nb.error("falta el \"tipo\" del componente (fijo, lineal, call, put, put_vendida, "
-                               "digital, digital_put o cliquet)");
+                               "digital, digital_put, cliquet, curva o formula)");
     b.cond = leer_condicion(nb.campo("condicion"));
     std::vector<std::string> validas = {"tipo", "condicion", "descripcion"};
     auto rd = [&](const char* clave, double def) {
@@ -755,12 +758,173 @@ Bloque leer_bloque(const Nodo& nb) {
                         porcentaje(b.techo) + ")";
     } else {
         nb.campo("tipo").error("tipo de componente \"" + tipo + "\" desconocido (use fijo, lineal, call, put, "
-                               "put_vendida, digital, digital_put o cliquet)");
+                               "put_vendida, digital, digital_put, cliquet, curva o formula)");
     }
     if (b.techo < b.suelo) nb.error("el techo es menor que el suelo");
     if (nb.campo("descripcion").existe()) b.descripcion = nb.campo("descripcion").texto();
     nb.claves_permitidas(validas);
     return b;
+}
+
+// ---------------------------------------------------------------------------- //
+// Componente "curva": pago A(P) dado por puntos (P_i, A_i) unidos por rectas.   //
+// Dos puntos con el mismo P marcan un salto (a la izquierda vale el primero, en //
+// P y a la derecha el segundo). Fuera de los puntos se extrapola constante (por //
+// defecto) o prolongando el primer/último tramo ("extrapolacion": "lineal").   //
+//                                                                              //
+// Como P ≥ 0, la curva es exactamente                                          //
+//     A(P) = A(0) + s0·P + Σ_k Δs_k·(P - K_k)⁺ + Σ_k J_k·1{P ≥ K_k}             //
+// (Δs_k = cambio de pendiente y J_k = salto en el nodo K_k): se descompone en  //
+// un fijo, un lineal, calls y digitales, que el núcleo ya sabe evaluar.        //
+// ---------------------------------------------------------------------------- //
+PerfilLineal leer_puntos_curva(const Nodo& nb, bool* lineal_out) {
+    Nodo npts = nb.alguno({"puntos", "curva", "tabla"});
+    npts.requerir("la lista de \"puntos\" de la curva: [[\"0%\", \"0%\"], [\"100%\", \"100%\"], ...] "
+                  "(rendimiento P y pago en % del nominal)");
+    if (!npts.es_lista() || npts.tamano() < 1)
+        npts.error("\"puntos\" debe ser una lista de pares [P, pago]");
+    std::vector<std::pair<double, double>> pts;
+    for (size_t i = 0; i < npts.tamano(); ++i) {
+        Nodo e = npts.elemento(i);
+        double P = 0, A = 0;
+        if (e.es_lista()) {
+            if (e.tamano() != 2) e.error("cada punto es un par [P, pago], p. ej. [\"80%\", \"95%\"]");
+            P = e.elemento(0).real();
+            A = e.elemento(1).real();
+        } else if (e.es_objeto()) {
+            P = e.alguno({"P", "p", "rendimiento"}).real();
+            A = e.alguno({"A", "pago", "importe"}).real();
+            e.claves_permitidas({"P", "p", "rendimiento", "A", "pago", "importe"});
+        } else {
+            e.error("cada punto es un par [P, pago], p. ej. [\"80%\", \"95%\"]");
+        }
+        if (!std::isfinite(P) || !std::isfinite(A)) e.error("valores no finitos");
+        if (P < 0.0) e.error("el rendimiento P no puede ser negativo");
+        if (!pts.empty() && P < pts.back().first - 1e-15)
+            e.error("los puntos deben ir ordenados de menor a mayor P");
+        pts.emplace_back(P, A);
+    }
+    PerfilLineal f;
+    for (size_t i = 0; i < pts.size(); ++i) {
+        if (!f.nodos.empty() && std::fabs(pts[i].first - f.nodos.back().p) <= 1e-15) {
+            if (f.nodos.back().der != f.nodos.back().izq)
+                npts.elemento(i).error("como mucho dos puntos con el mismo P (un salto)");
+            f.nodos.back().der = pts[i].second;
+        } else {
+            f.nodos.push_back(NodoPerfil{pts[i].first, pts[i].second, pts[i].second});
+        }
+    }
+    std::string ext = normalizar(nb.campo("extrapolacion").texto("constante"));
+    bool lineal = false;
+    if (ext == "lineal" || ext == "linear" || ext == "prolongar") lineal = true;
+    else if (ext != "constante" && ext != "plana" && ext != "constant")
+        nb.campo("extrapolacion").error("\"extrapolacion\" debe ser \"constante\" o \"lineal\"");
+    if (lineal && f.nodos.size() < 2) nb.campo("extrapolacion").error("la extrapolación lineal necesita dos P distintos");
+    if (lineal) {
+        f.pend_izq = f.pendiente_tras(0);
+        f.pend_der = f.pendiente_tras(f.nodos.size() - 2);
+    }
+    *lineal_out = lineal;
+    return f;
+}
+
+// Descompone la curva en bloques elementales (todos con la misma condición):
+// como P ≥ 0, basta desarrollarla en P0 = 0, A(P) = A(0) + s0·P + calls + digitales.
+std::vector<Bloque> bloques_de_curva(const PerfilLineal& f, int cond) {
+    Descomposicion d = descomponer(f, 0.0);
+    std::vector<Bloque> out;
+    Bloque b0;
+    b0.tipo = BLQ_FIJO;
+    b0.cond = cond;
+    b0.importe = d.base;
+    out.push_back(b0);
+    if (d.pendiente != 0.0) {
+        Bloque b;
+        b.tipo = BLQ_LINEAL;
+        b.cond = cond;
+        b.part = d.pendiente;
+        b.oculto = true;
+        out.push_back(b);
+    }
+    for (const auto& c : d.calls) {
+        Bloque b;
+        b.tipo = BLQ_CALL;
+        b.cond = cond;
+        b.part = c.w;
+        b.strike = c.k;
+        b.oculto = true;
+        out.push_back(b);
+    }
+    for (const auto& c : d.dig_calls) {
+        Bloque b;
+        b.tipo = BLQ_DIGITAL;
+        b.cond = cond;
+        b.importe = c.w;
+        b.strike = c.k;
+        b.oculto = true;
+        out.push_back(b);
+    }
+    return out;
+}
+
+// Lee un componente de la amortización final y lo añade al producto (uno o
+// varios bloques). escala_S > 0 permite usar S (precio) en las fórmulas.
+void leer_componente(const Nodo& nb, Producto& p, int indice, double escala_S) {
+    if (!nb.es_objeto()) nb.error("cada componente es un objeto {\"tipo\": ..., ...}");
+    std::string tipo = normalizar(nb.campo("tipo").texto(""));
+    if (tipo == "curva" || tipo == "tabla" || tipo == "puntos" || tipo == "dibujo") {
+        int cond = leer_condicion(nb.campo("condicion"));
+        bool lineal = false;
+        PerfilLineal perfil = leer_puntos_curva(nb, &lineal);
+        const std::vector<NodoPerfil>& nodos = perfil.nodos;
+        std::vector<Bloque> bl = bloques_de_curva(perfil, cond);
+        // Descripción: los puntos (abreviada si son muchos)
+        std::string d = "curva por puntos (P, pago):";
+        for (size_t i = 0; i < nodos.size(); ++i) {
+            if (nodos.size() > 8 && i == 4) {
+                d += " … (" + std::to_string(nodos.size() - 6) + " más) …";
+                i = nodos.size() - 3;
+                continue;
+            }
+            d += " (" + porcentaje(nodos[i].p) + ", " + porcentaje(nodos[i].izq) + ")";
+            if (nodos[i].der != nodos[i].izq) d += "→(" + porcentaje(nodos[i].p) + ", " + porcentaje(nodos[i].der) + ")";
+        }
+        d += lineal ? "; fuera, prolonga los extremos" : "; fuera, constante";
+        if (nb.campo("descripcion").existe()) d = nb.campo("descripcion").texto();
+        bl[0].descripcion = d;
+        for (auto& b : bl) { b.componente = indice; p.bloques.push_back(b); }
+        nb.claves_permitidas({"tipo", "condicion", "descripcion", "puntos", "curva", "tabla", "extrapolacion"});
+        return;
+    }
+    if (tipo == "formula" || tipo == "expresion" || tipo == "funcion") {
+        Bloque b;
+        b.tipo = BLQ_FORMULA;
+        b.cond = leer_condicion(nb.campo("condicion"));
+        Nodo ne = nb.alguno({"expresion", "formula", "pago"});
+        ne.requerir("la \"expresion\" del pago en función de P, p. ej. \"100% + 50% * max(P - 1, 0)\"");
+        std::string texto = ne.texto();
+        Formula f;
+        try {
+            f = compilar_formula(texto, escala_S);
+            comprobar_finita(f);
+        } catch (const ErrorFormula& e) {
+            ne.error(std::string("fórmula no válida: ") + e.what());
+        }
+        b.formula_ini = (int)p.formulas.size();
+        b.formula_len = (int)f.codigo.size();
+        for (const auto& ins : f.codigo) p.formulas.push_back(ins);
+        p.textos_formula.push_back(texto);
+        b.descripcion = "f(P) = " + texto;
+        if (nb.campo("descripcion").existe()) b.descripcion = nb.campo("descripcion").texto();
+        if (!f.usa_P) ne.aviso("la fórmula no depende de P: equivale a un importe fijo");
+        b.componente = indice;
+        p.bloques.push_back(b);
+        nb.claves_permitidas({"tipo", "condicion", "descripcion", "expresion", "formula", "pago"});
+        return;
+    }
+    Bloque b = leer_bloque(nb);
+    b.componente = indice;
+    p.bloques.push_back(b);
 }
 
 } // namespace
@@ -1129,7 +1293,8 @@ Producto compilar(const json::Valor& doc) {
     }
     if (!ncomp.es_lista()) ncomp.error("los componentes de la amortización deben ir en una lista [ ... ]");
     if ((int)ncomp.tamano() > MAX_BLOQUES_HD) ncomp.error("como máximo " + std::to_string(MAX_BLOQUES_HD) + " componentes");
-    for (size_t i = 0; i < ncomp.tamano(); ++i) p.bloques.push_back(leer_bloque(ncomp.elemento(i)));
+    const double escala_S = (p.activos.size() == 1) ? p.activos[0].nivel_inicial : 0.0;
+    for (size_t i = 0; i < ncomp.tamano(); ++i) leer_componente(ncomp.elemento(i), p, (int)i, escala_S);
     int n_cliq = 0;
     for (const auto& b : p.bloques) n_cliq += (b.tipo == BLQ_CLIQUET);
     if (n_cliq > 1) ncomp.error("solo se admite un componente cliquet");

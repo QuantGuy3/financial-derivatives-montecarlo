@@ -1,9 +1,11 @@
 #include "plantillas.hpp"
+#include "expresion.hpp"
 #include "producto.hpp"
 
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <sstream>
 
 namespace est {
 
@@ -442,6 +444,59 @@ std::vector<Plantilla> construir_plantillas() {
 
     // ------------------------------------------------------------------ //
     v.push_back(Plantilla{
+        "pago_a_medida", "Pago a medida (una fórmula en P)",
+        "El pago a vencimiento es una fórmula en el rendimiento final P (100% = nivel inicial), por ejemplo "
+        "100% + 50% * max(P - 1, 0)^2. Admite + - * / ^, comparaciones (valen 1 o 0) y las funciones max, min, abs, "
+        "exp, log, sqrt, si(c,a,b), clamp(x,lo,hi), call(k), put(k), digital(k) y digital_put(k). Con un solo "
+        "subyacente también vale S (el precio). 'estructurados replicar' construye su réplica con opciones.",
+        uno, "1A",
+        {Q("formula", "Pago a vencimiento en función de P (en % del nominal)", "100% + 50% * max(P - 1, 0)^2",
+           TipoDato::Formula,
+           "P = rendimiento final (1 = 100%). Ejemplos: max(100%, P) · 100% + 2*call(110%) - 2*call(130%) · "
+           "si(P >= 70%, 100%, P) · 1 + 0.5*abs(P - 1)")},
+        [](json::Valor& doc, const Respuestas& r) {
+            json::Valor comp = json::Valor::lista();
+            json::Valor f = bloque("formula");
+            f.poner("expresion", r.at("formula"));
+            comp.anadir(f);
+            doc.poner("amortizacion_final", comp);
+        },
+        [](const Respuestas& r) { return "Paga a vencimiento f(P) = " + r.at("formula") + " (en % del nominal)."; }});
+
+    // ------------------------------------------------------------------ //
+    v.push_back(Plantilla{
+        "pago_por_puntos", "Pago por puntos (curva, como un dibujo)",
+        "El pago a vencimiento es una curva definida por puntos (P, pago) unidos por tramos rectos; dos puntos con "
+        "el mismo P marcan un salto. Es lo que guarda el diseñador visual al dibujar el pago. La curva se "
+        "descompone de forma exacta en bono, subyacente, calls y digitales (ver 'estructurados replicar').",
+        uno, "1A",
+        {Q("puntos", "Puntos P:pago (en %)", "0:90 90:90 100:100 130:130 130:135 200:135", TipoDato::Puntos,
+           "pares rendimiento:pago separados por espacios, de menor a mayor P; 130:130 130:135 es un salto en 130%"),
+         Q("extrapolacion", "Antes del primer punto y después del último", "constante", TipoDato::Opcion,
+           "constante = se mantiene el valor del extremo; lineal = sigue la pendiente del tramo extremo",
+           {"constante", "lineal"})},
+        [](json::Valor& doc, const Respuestas& r) {
+            json::Valor pts = json::Valor::lista();
+            std::istringstream is(r.at("puntos"));
+            std::string tok;
+            while (is >> tok) {
+                size_t dp = tok.find(':');
+                json::Valor par = json::Valor::lista();
+                par.anadir(json::Valor(tok.substr(0, dp)));
+                par.anadir(json::Valor(tok.substr(dp + 1)));
+                pts.anadir(par);
+            }
+            json::Valor c = bloque("curva");
+            c.poner("puntos", pts);
+            c.poner("extrapolacion", r.at("extrapolacion"));
+            json::Valor comp = json::Valor::lista();
+            comp.anadir(c);
+            doc.poner("amortizacion_final", comp);
+        },
+        [](const Respuestas& r) { return "Paga a vencimiento la curva por puntos (P:pago) " + r.at("puntos") + "."; }});
+
+    // ------------------------------------------------------------------ //
+    v.push_back(Plantilla{
         "personalizado", "Personalizado (todas las piezas, para editar a mano)",
         "Ejemplo con todas las secciones del formato: varias patas de cupón, autocancelación con step-down, "
         "barrera de capital continua, componentes finales y estado de un producto vivo.",
@@ -516,6 +571,8 @@ const Plantilla* buscar_plantilla(const std::string& id) {
     if (b == "rc" || b == "brc" || b == "reverse") return buscar_plantilla("reverse_convertible");
     if (b == "garantizado" || b == "cpn") return buscar_plantilla("capital_protegido");
     if (b == "call" || b == "put" || b == "vanilla") return buscar_plantilla("opcion");
+    if (b == "formula" || b == "a_medida") return buscar_plantilla("pago_a_medida");
+    if (b == "curva" || b == "puntos" || b == "dibujo" || b == "dibujado") return buscar_plantilla("pago_por_puntos");
     return nullptr;
 }
 
@@ -551,6 +608,44 @@ bool normalizar_respuesta(const Pregunta& q, const std::string& texto0, std::str
     case TipoDato::Texto:
         can = t;
         return true;
+    case TipoDato::Formula:
+        try {
+            Formula f = compilar_formula(t, 1.0);
+            comprobar_finita(f);
+        } catch (const ErrorFormula& e) {
+            err = e.what();
+            return false;
+        }
+        can = t;
+        return true;
+    case TipoDato::Puntos: {
+        // "P:pago" separados por espacios o ';' (en puntos porcentuales o con %)
+        std::string norm, tok;
+        double p_ant = -1e300;
+        int n = 0;
+        std::string tt = t;
+        for (auto& ch : tt) if (ch == ';' || ch == '\t' || ch == '\n') ch = ' ';
+        std::istringstream is(tt);
+        while (is >> tok) {
+            size_t dp = tok.find(':');
+            if (dp == std::string::npos) { err = "cada punto se escribe P:pago, p. ej. 100:100 (\"" + tok + "\")"; return false; }
+            auto leer = [&](const std::string& x, double* v) {
+                bool okx = false;
+                if (!x.empty() && x.back() == '%') *v = texto_a_real(x, &okx);
+                else *v = texto_a_real(x, &okx) / 100.0;
+                return okx;
+            };
+            double P = 0, A = 0;
+            if (!leer(tok.substr(0, dp), &P) || !leer(tok.substr(dp + 1), &A)) { err = "número no válido en \"" + tok + "\""; return false; }
+            if (P < 0) { err = "P no puede ser negativo"; return false; }
+            if (P < p_ant - 1e-12) { err = "los puntos deben ir de menor a mayor P"; return false; }
+            p_ant = P;
+            norm += (n++ ? " " : "") + porcentaje(P, 4) + ":" + porcentaje(A, 4);
+        }
+        if (n < 1) { err = "escriba al menos un punto P:pago"; return false; }
+        can = norm;
+        return true;
+    }
     case TipoDato::Real: {
         double x = texto_a_real(t, &ok);
         if (!ok) { err = "escriba un número"; return false; }

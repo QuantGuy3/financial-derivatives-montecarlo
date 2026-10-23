@@ -172,6 +172,24 @@ pre.json { margin: 0; max-height: 360px; overflow: auto; background: var(--campo
 .aviso-accion.ok { color: var(--ok); }
 .aviso-accion.mal { color: var(--error); }
 code { font-family: var(--fuente-datos); font-size: 0.88em; }
+/* Lienzo para dibujar el pago (plantilla "Pago dibujado") */
+.lienzo { border: 1px solid var(--regla); border-radius: var(--radio); background: var(--hoja); touch-action: none;
+          user-select: none; -webkit-user-select: none; cursor: crosshair; }
+.lienzo svg { width: 100%; height: auto; display: block; }
+.lienzo .nodo { fill: var(--hoja); stroke: var(--acento); stroke-width: 2; cursor: ns-resize; }
+.lienzo .nodo:focus { outline: none; }
+.lienzo .nodo:focus-visible { stroke: var(--tocada); stroke-width: 3.5; }
+.barra-dibujo { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.barra-dibujo .etq { font-size: 0.8rem; color: var(--tinta-2); margin-right: 2px; }
+.tabla-nodos { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 6px; margin-top: 8px; }
+.tabla-nodos label { font-size: 0.74rem; color: var(--tinta-2); display: flex; flex-direction: column; gap: 2px; }
+.tabla-nodos input { width: 100%; border: 1px solid var(--regla); border-radius: var(--radio); background: var(--campo);
+                     padding: 4px 6px; font-variant-numeric: tabular-nums; }
+.tabla-nodos input.mal { border-color: var(--error); background: var(--error-suave); }
+details > summary { cursor: pointer; font-weight: 500; font-size: 0.9rem; }
+.replica-cab { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; justify-content: space-between; }
+.replica-total { font-size: 0.95rem; }
+.replica-total strong { font-family: var(--fuente-datos); font-weight: 500; }
 @media (prefers-reduced-motion: no-preference) { .boton { transition: filter 0.15s; } }
 </style>
 </head>
@@ -229,6 +247,10 @@ code { font-family: var(--fuente-datos); font-size: 0.88em; }
         <div id="perfil"></div>
         <div class="leyenda" id="leyenda"></div>
         <p class="nota" id="nota-perfil"></p>
+      </section>
+      <section class="panel" id="panel-replica">
+        <div class="json-cab"><h3>Réplica estática</h3><span class="etiqueta-mini">Carr-Madan</span></div>
+        <div id="replica"></div>
       </section>
       <section class="panel">
         <h3>Calendario de observación</h3>
@@ -526,6 +548,9 @@ const PLANTILLAS = [
       if (t.startsWith('digital')) b.importe = pct(r.importe);
       return { amortizacion_final: [b] }; },
     describir: r => `Opción ${r.tipo_opcion} europea con strike ${pct(r.strike)}.` },
+  { id: 'dibujado', titulo: 'Pago dibujado', sub: 'Dibújelo y vea su réplica', subs: UNO, venc: '1A',
+    desc: 'Dibuje con el ratón o con el dedo el pago a vencimiento en función del rendimiento final P; los nodos se pueden arrastrar o escribir. El producto paga esa curva (unida por tramos rectos) y el panel «Réplica estática» muestra cómo construirla con un bono, el subyacente y opciones, como en TooManyOptions.',
+    preguntas: [], construir: null, describir: null },
   { id: 'personalizado', titulo: 'Personalizado', sub: 'Construir pieza a pieza', subs: DOS, venc: '3A',
     desc: 'Combine libremente calendario, patas de cupón, autocancelación, barreras y los componentes del pago final.',
     preguntas: [], construir: null, describir: null },
@@ -574,6 +599,27 @@ function personalizadoInicial() {
               { tipo: 'put_vendida', strike: 100, participacion: 100, condicion: 'barrera_tocada' }],
   };
 }
+// Pago dibujado: nodos [P, pago] en puntos porcentuales sobre una rejilla regular
+function formaEjemplo(nombre, p) {
+  switch (nombre) {
+    case 'bonus':     return p < 70 ? p : Math.max(120, Math.min(p, 150));
+    case 'mariposa':  return 100 + Math.max(0, 25 - Math.abs(p - 100));
+    case 'lineal':    return p;
+    case 'twin':      return p < 60 ? p : Math.min(100 + Math.abs(p - 100), 150);
+    case 'plano':     return 100;
+    default:          return Math.min(100 + 0.8 * Math.max(p - 100, 0), 160); // capital protegido
+  }
+}
+function rejillaDibujo(d) {
+  const r = [];
+  for (let p = d.pmin; p <= d.pmax + 1e-9; p += d.paso) r.push(Math.round(p * 1000) / 1000);
+  return r;
+}
+function dibujoInicial() {
+  const d = { paso: 5, pmin: 0, pmax: 200, amin: 0, amax: 200, suavizar: true, extrapolacion: 'constante' };
+  d.puntos = rejillaDibujo(d).map(p => [p, formaEjemplo('protegido', p)]);
+  return d;
+}
 function estadoInicial(id) {
   const p = plantilla(id);
   return {
@@ -585,6 +631,8 @@ function estadoInicial(id) {
     cesta: 'peor',
     resp: respuestasDe(p),
     pers: personalizadoInicial(),
+    dibujo: dibujoInicial(),
+    replicaStrikes: 0,
     simulacion: { metodo: 'auto', error: 0.05 },
   };
 }
@@ -699,6 +747,7 @@ function valorPareja(i, j) {
 function renderCaracteristicas() {
   const p = plantilla(estado.plantilla);
   if (p.id === 'personalizado') { renderPersonalizado(); return; }
+  if (p.id === 'dibujado') { renderDibujo(); return; }
   const r = interpretarRespuestas(p);
   const html = p.preguntas.filter(q => !q.si || q.si(r)).map(q => {
     const ruta = 'resp.' + q.k, v = estado.resp[q.k];
@@ -779,6 +828,183 @@ function renderPersonalizado() {
   });
   h += `</div>`;
   $('#caracteristicas').innerHTML = h;
+}
+
+// ----------------------------------------------------------------------
+// Pago dibujado
+// ----------------------------------------------------------------------
+const LZ = { W: 640, H: 340, l: 50, r: 14, t: 14, b: 34 };
+const lzX = p => { const d = estado.dibujo; return LZ.l + (LZ.W - LZ.l - LZ.r) * (p - d.pmin) / (d.pmax - d.pmin); };
+const lzY = a => { const d = estado.dibujo; return LZ.H - LZ.b - (LZ.H - LZ.t - LZ.b) * (a - d.amin) / (d.amax - d.amin); };
+function lzInv(x, y) {
+  const d = estado.dibujo;
+  return [d.pmin + (x - LZ.l) / (LZ.W - LZ.l - LZ.r) * (d.pmax - d.pmin),
+          d.amin + (LZ.H - LZ.b - y) / (LZ.H - LZ.t - LZ.b) * (d.amax - d.amin)];
+}
+function svgDibujo() {
+  const d = estado.dibujo;
+  const fx = (d.pmax - d.pmin) > 200 ? 50 : 25, fy = (d.amax - d.amin) > 200 ? 50 : 25;
+  let s = `<svg viewBox="0 0 ${LZ.W} ${LZ.H}" role="img" aria-label="Lienzo: pago a vencimiento (eje vertical, % del nominal) según el rendimiento final P (eje horizontal)">`;
+  s += `<rect x="${LZ.l}" y="${LZ.t}" width="${LZ.W - LZ.l - LZ.r}" height="${LZ.H - LZ.t - LZ.b}" fill="var(--hoja)" stroke="var(--regla)"/>`;
+  for (let p = Math.ceil(d.pmin / fx) * fx; p <= d.pmax + 1e-9; p += fx)
+    s += `<line x1="${lzX(p)}" x2="${lzX(p)}" y1="${LZ.t}" y2="${LZ.H - LZ.b}" stroke="var(--cuadricula)"/>` +
+         `<text x="${lzX(p)}" y="${LZ.H - LZ.b + 15}" text-anchor="middle" font-size="11" fill="var(--tinta-2)" font-family="var(--fuente-datos)">${p}%</text>`;
+  for (let a = Math.ceil(d.amin / fy) * fy; a <= d.amax + 1e-9; a += fy)
+    s += `<line x1="${LZ.l}" x2="${LZ.W - LZ.r}" y1="${lzY(a)}" y2="${lzY(a)}" stroke="var(--cuadricula)"/>` +
+         `<text x="${LZ.l - 6}" y="${lzY(a) + 4}" text-anchor="end" font-size="11" fill="var(--tinta-2)" font-family="var(--fuente-datos)">${a}%</text>`;
+  if (d.amin < 100 && d.amax > 100)
+    s += `<line x1="${LZ.l}" x2="${LZ.W - LZ.r}" y1="${lzY(100)}" y2="${lzY(100)}" stroke="var(--tinta-2)" stroke-dasharray="2 4"/>`;
+  if (d.pmin < 100 && d.pmax > 100)
+    s += `<line x1="${lzX(100)}" x2="${lzX(100)}" y1="${LZ.t}" y2="${LZ.H - LZ.b}" stroke="var(--tocada)" stroke-dasharray="5 4"/>` +
+         `<text x="${lzX(100) + 4}" y="${LZ.t + 12}" font-size="11" fill="var(--tocada)" font-family="var(--fuente-texto)">P0 (spot)</text>`;
+  const pts = d.puntos.filter(([, a]) => Number.isFinite(a));
+  if (pts.length) {
+    const cl = a => Math.min(Math.max(a, d.amin - 1000), d.amax + 1000);
+    s += `<polyline fill="none" stroke="var(--acento)" stroke-width="2.4" stroke-linejoin="round" points="${pts.map(([p, a]) => lzX(p).toFixed(1) + ',' + lzY(cl(a)).toFixed(1)).join(' ')}"/>`;
+  }
+  s += `<polyline id="trazo" fill="none" stroke="var(--tocada)" stroke-width="2" stroke-dasharray="1 0" points=""/>`;
+  d.puntos.forEach(([p, a], i) => {
+    if (!Number.isFinite(a) || a < d.amin - 1e-9 || a > d.amax + 1e-9) return;
+    s += `<circle class="nodo" data-i="${i}" tabindex="0" role="slider" aria-valuemin="${d.amin}" aria-valuemax="${d.amax}" aria-valuenow="${num(a)}" aria-label="Pago en P = ${num(p)}%" cx="${lzX(p).toFixed(1)}" cy="${lzY(a).toFixed(1)}" r="${d.puntos.length > 60 ? 2.6 : d.puntos.length > 30 ? 3.6 : 5}"/>`;
+  });
+  s += `<text x="${LZ.l + (LZ.W - LZ.l - LZ.r) / 2}" y="${LZ.H - 4}" text-anchor="middle" font-size="11.5" fill="var(--tinta-2)" font-family="var(--fuente-texto)">P final (100% = nivel inicial)</text>`;
+  return s + `</svg>`;
+}
+function renderDibujo() {
+  const d = estado.dibujo;
+  const forma = (id, t) => `<button type="button" class="boton secundario pequeno" data-accion="forma" data-forma="${id}">${t}</button>`;
+  let h = `<div class="barra-dibujo"><span class="etq">Empezar desde:</span>` +
+    forma('protegido', 'Capital protegido') + forma('bonus', 'Bonus') + forma('twin', 'Twin-win') +
+    forma('mariposa', 'Mariposa') + forma('lineal', 'Subyacente') + forma('plano', '100% fijo') + `</div>`;
+  h += `<div class="lienzo" id="lienzo">${svgDibujo()}</div>`;
+  h += `<p class="nota">Dibuje de izquierda a derecha; puede repasar solo un tramo y el resto no cambia. Arrastre un nodo para ajustarlo, o selecciónelo con Tab y use ↑ / ↓ (con Mayús, 5 puntos).</p>`;
+  h += `<div class="rejilla">` +
+    campo({ ruta: 'dibujo.paso', etiqueta: 'Nodos cada', tipo: 'sel', valor: d.paso, estructural: true, opciones: [[2.5, '2,5%'], [5, '5%'], [10, '10%']] }) +
+    campo({ ruta: 'dibujo.pmax', etiqueta: 'Rendimiento máximo', tipo: 'sel', valor: d.pmax, estructural: true, opciones: [[150, '150%'], [200, '200%'], [300, '300%']] }) +
+    campo({ ruta: 'dibujo.amax', etiqueta: 'Escala del pago hasta', tipo: 'sel', valor: d.amax, estructural: true, opciones: [[150, '150%'], [200, '200%'], [300, '300%'], [500, '500%']] }) +
+    campo({ ruta: 'dibujo.amin', etiqueta: 'Escala del pago desde', tipo: 'sel', valor: d.amin, estructural: true, opciones: [[0, '0%'], [-50, '-50%'], [-100, '-100%']] }) +
+    campo({ ruta: 'dibujo.extrapolacion', etiqueta: 'Más allá del último nodo', tipo: 'sel', valor: d.extrapolacion, opciones: [['constante', 'Constante'], ['lineal', 'Sigue la pendiente']] }) +
+    campo({ ruta: 'dibujo.suavizar', etiqueta: 'Suavizar el trazo', tipo: 'bool', valor: d.suavizar }) +
+    `</div>`;
+  h += `<details><summary>Escribir los valores de los nodos (% del nominal)</summary><div class="tabla-nodos">` +
+    d.puntos.map(([p, a], i) => `<label>P = ${num(p)}%<input type="text" inputmode="decimal" autocomplete="off" data-nodo="${i}" value="${Number.isFinite(a) ? num(a) : ''}"></label>`).join('') +
+    `</div></details><span class="fallo" data-fallo="dibujo.puntos"></span>`;
+  $('#caracteristicas').innerHTML = h;
+}
+function redibujarLienzo() {
+  const l = $('#lienzo');
+  if (l) l.innerHTML = svgDibujo();
+}
+// Interpolación lineal de los nodos (para cambiar la rejilla sin perder el dibujo)
+function valorDibujo(puntos, p) {
+  const v = puntos.filter(([, a]) => Number.isFinite(a));
+  if (!v.length) return 100;
+  if (p <= v[0][0]) return v[0][1];
+  for (let i = 1; i < v.length; i++)
+    if (p <= v[i][0]) return v[i - 1][1] + (v[i][1] - v[i - 1][1]) * (p - v[i - 1][0]) / (v[i][0] - v[i - 1][0]);
+  return v[v.length - 1][1];
+}
+function reajustarRejilla() {
+  const d = estado.dibujo, viejos = d.puntos.map(x => x.slice());
+  d.puntos = rejillaDibujo(d).map(p => [p, Math.round(valorDibujo(viejos, p) * 10) / 10]);
+}
+// Trazo a mano alzada -> valores de los nodos que cubre
+function aplicarTrazo(trazo) {
+  const d = estado.dibujo;
+  if (trazo.length < 2) return;
+  trazo.sort((a, b) => a[0] - b[0]);
+  const p0 = trazo[0][0], p1 = trazo[trazo.length - 1][0];
+  const sigma = Math.max(d.paso * 0.6, 1e-6);
+  for (const nodo of d.puntos) {
+    const p = nodo[0];
+    if (p < p0 - 1e-9 || p > p1 + 1e-9) continue;
+    let a;
+    if (d.suavizar) {
+      let sw = 0, sa = 0;
+      for (const [x, y] of trazo) { const w = Math.exp(-0.5 * ((x - p) / sigma) ** 2); sw += w; sa += w * y; }
+      a = sw > 0 ? sa / sw : valorDibujo(trazo, p);
+    } else a = valorDibujo(trazo, p);
+    nodo[1] = Math.round(a * 10) / 10;
+  }
+}
+let lienzoEstado = null; // {modo: 'trazo'|'nodo', trazo, i}
+function puntoLienzo(ev) {
+  const svg = $('#lienzo svg');
+  const r = svg.getBoundingClientRect();
+  return [(ev.clientX - r.left) / r.width * LZ.W, (ev.clientY - r.top) / r.height * LZ.H];
+}
+function sincronizarTablaNodos() {
+  document.querySelectorAll('[data-nodo]').forEach(inp => {
+    const a = estado.dibujo.puntos[+inp.dataset.nodo][1];
+    if (document.activeElement !== inp) inp.value = Number.isFinite(a) ? num(a) : '';
+  });
+}
+document.addEventListener('pointerdown', ev => {
+  const l = ev.target.closest && ev.target.closest('#lienzo');
+  if (!l || ev.button > 0) return;
+  ev.preventDefault();
+  l.setPointerCapture(ev.pointerId);
+  const [x, y] = puntoLienzo(ev);
+  // Se agarra el nodo más cercano si el puntero está a menos de 12 unidades de él
+  let cerca = -1, dmin = 12;
+  estado.dibujo.puntos.forEach(([p, a], i) => {
+    if (!Number.isFinite(a)) return;
+    const dd = Math.hypot(lzX(p) - x, lzY(a) - y);
+    if (dd < dmin) { dmin = dd; cerca = i; }
+  });
+  if (cerca >= 0) {
+    lienzoEstado = { modo: 'nodo', i: cerca };
+    document.querySelector(`#lienzo .nodo[data-i="${cerca}"]`)?.focus();
+    return;
+  }
+  lienzoEstado = { modo: 'trazo', trazo: [lzInv(x, y)], pantalla: [[x, y]] };
+});
+document.addEventListener('pointermove', ev => {
+  if (!lienzoEstado) return;
+  const d = estado.dibujo;
+  const [x, y] = puntoLienzo(ev);
+  if (lienzoEstado.modo === 'nodo') {
+    const [, a] = lzInv(x, y);
+    d.puntos[lienzoEstado.i][1] = Math.round(Math.min(Math.max(a, d.amin), d.amax) * 2) / 2;
+    redibujarLienzo();
+    sincronizarTablaNodos();
+    actualizar();
+    return;
+  }
+  const [p, a] = lzInv(x, y);
+  if (p < d.pmin - 1 || p > d.pmax + 1) return;
+  lienzoEstado.trazo.push([Math.min(Math.max(p, d.pmin), d.pmax), Math.min(Math.max(a, d.amin), d.amax)]);
+  lienzoEstado.pantalla.push([x, y]);
+  const t = $('#trazo');
+  if (t) t.setAttribute('points', lienzoEstado.pantalla.map(([u, w]) => u.toFixed(1) + ',' + w.toFixed(1)).join(' '));
+});
+const finTrazo = () => {
+  if (!lienzoEstado) return;
+  const e = lienzoEstado;
+  lienzoEstado = null;
+  if (e.modo === 'trazo') aplicarTrazo(e.trazo);
+  redibujarLienzo();
+  sincronizarTablaNodos();
+  actualizar();
+  if (e.modo === 'nodo') document.querySelector(`#lienzo .nodo[data-i="${e.i}"]`)?.focus();
+};
+document.addEventListener('pointerup', finTrazo);
+document.addEventListener('pointercancel', finTrazo);
+document.addEventListener('keydown', ev => {
+  const nodo = ev.target.closest && ev.target.closest('#lienzo .nodo');
+  if (!nodo || (ev.key !== 'ArrowUp' && ev.key !== 'ArrowDown')) return;
+  ev.preventDefault();
+  const d = estado.dibujo, i = +nodo.dataset.i, paso = ev.shiftKey ? 5 : 1;
+  const a = d.puntos[i][1] + (ev.key === 'ArrowUp' ? paso : -paso);
+  d.puntos[i][1] = Math.min(Math.max(a, d.amin), d.amax);
+  redibujarLienzo();
+  sincronizarTablaNodos();
+  actualizar();
+  document.querySelector(`#lienzo .nodo[data-i="${i}"]`)?.focus();
+});
+function construirDibujado() {
+  const d = estado.dibujo;
+  return { amortizacion_final: [{ tipo: 'curva', puntos: d.puntos.map(([p, a]) => [pct(p), pct(a)]), extrapolacion: d.extrapolacion }] };
 }
 
 function renderSimulacion() {
@@ -878,7 +1104,10 @@ function validar() {
 
   // Características
   let nobs = 1;
-  if (p.id === 'personalizado') {
+  if (p.id === 'dibujado') {
+    const malos = estado.dibujo.puntos.filter(([, a]) => !Number.isFinite(a) || a < -100000 || a > 100000);
+    if (malos.length) fallo('dibujo.puntos', `Hay ${malos.length} ${malos.length === 1 ? 'nodo' : 'nodos'} sin un número válido (P = ${malos.slice(0, 4).map(x => num(x[0]) + '%').join(', ')}${malos.length > 4 ? '…' : ''}).`);
+  } else if (p.id === 'personalizado') {
     const s = estado.pers;
     nobs = Number.isFinite(T) ? Math.max(1, Math.ceil(T * frecuenciaPorAnio(s.frecuencia) - 1e-6)) : 1;
     s.cupones.forEach((cu, i) => {
@@ -951,6 +1180,11 @@ function construirDocumento() {
   const doc = { formato: 'producto-estructurado/1', plantilla: p.id, nombre: String(g.nombre).trim() || p.titulo };
   let secciones, descAuto = '';
   if (p.id === 'personalizado') secciones = construirPersonalizado();
+  else if (p.id === 'dibujado') {
+    secciones = construirDibujado();
+    const d = estado.dibujo;
+    descAuto = `Pago a vencimiento dibujado: ${d.puntos.length} nodos entre ${pct(d.pmin)} y ${pct(d.pmax)} de rendimiento final, unidos por tramos rectos.`;
+  }
   else { const r = interpretarRespuestas(p); secciones = p.construir(r); descAuto = p.describir(r); }
   const desc = String(g.descripcion).trim() || descAuto;
   if (desc) doc.descripcion = desc;
@@ -983,7 +1217,8 @@ function construirDocumento() {
   }
   Object.assign(doc, secciones);
   doc.simulacion = { metodo: estado.simulacion.metodo, error_objetivo: pct(leerNumero(estado.simulacion.error)) };
-  doc._disenador = { version: 1, estado };
+  const { replicaStrikes, ...guardado } = estado; // la vista de la réplica no forma parte del producto
+  doc._disenador = { version: 1, estado: guardado };
   return doc;
 }
 
@@ -1085,13 +1320,35 @@ function vistaDe(doc) {
                 suelo: b.suelo != null ? fr(b.suelo) : (b.tipo === 'cliquet' ? fr(b.suelo_global ?? 0) : -Infinity),
                 techo: b.techo != null ? fr(b.techo) : (b.tipo === 'cliquet' && b.techo_global != null ? fr(b.techo_global) : Infinity) };
     if (b.tipo === 'put_vendida') { o.tipo = 'put'; o.part = -o.part / o.strike; }
+    if (b.tipo === 'curva') { o.nodos = (b.puntos || []).map(([x, y]) => [fr(x), fr(y)]); o.ext = b.extrapolacion || 'constante'; }
     if (b.tipo === 'cliquet') { o.suelo = fr(b.suelo_global ?? 0); o.techo = b.techo_global != null ? fr(b.techo_global) : Infinity; }
     return o;
   });
   const ki = doc.barrera_capital ? { nivel: fr(doc.barrera_capital.nivel), obs: doc.barrera_capital.observacion || 'vencimiento' } : null;
   const ko = doc.barrera_desactivante ? { nivel: fr(doc.barrera_desactivante.nivel), importe: fr(doc.barrera_desactivante.importe ?? '100%') } : null;
+  const pMaxCurva = Math.max(0, ...bloques.filter(b => b.tipo === 'curva' && b.nodos.length).map(b => b.nodos[b.nodos.length - 1][0]));
   return { T, filas, bloques, ki, ko, medio: !Array.isArray(am) && am && am.rendimiento === 'medio',
-           cliquet: bloques.some(b => b.tipo === 'cliquet'), conCupones: patas.length > 0, conAc: !!ac };
+           cliquet: bloques.some(b => b.tipo === 'cliquet'), conCupones: patas.length > 0, conAc: !!ac, pMaxCurva,
+           patas, fechas, n_sub: (doc.subyacentes || []).length };
+}
+// Curva por puntos (con saltos si dos nodos comparten P): lineal entre nodos
+function evalCurva(b, P) {
+  const n = b.nodos;
+  if (!n.length) return 0;
+  const lin = b.ext === 'lineal' && n.length > 1;
+  if (P < n[0][0]) {
+    if (!lin) return n[0][1];
+    let j = 1; while (j < n.length && n[j][0] === n[0][0]) j++;
+    return j < n.length ? n[0][1] + (n[j][1] - n[0][1]) / (n[j][0] - n[0][0]) * (P - n[0][0]) : n[0][1];
+  }
+  let i = 0;
+  while (i + 1 < n.length && n[i + 1][0] <= P) i++;
+  if (i === n.length - 1) {
+    if (!lin) return n[i][1];
+    let j = i - 1; while (j >= 0 && n[j][0] === n[i][0]) j--;
+    return j >= 0 ? n[i][1] + (n[i][1] - n[j][1]) / (n[i][0] - n[j][0]) * (P - n[i][0]) : n[i][1];
+  }
+  return n[i][1] + (n[i + 1][1] - n[i][1]) / (n[i + 1][0] - n[i][0]) * (P - n[i][0]);
 }
 function amortizacion(bloques, P, tocada) {
   let A = 0;
@@ -1106,6 +1363,7 @@ function amortizacion(bloques, P, tocada) {
       case 'digital': if (P >= b.strike) A += b.importe; break;
       case 'digital_put': if (P < b.strike) A += b.importe; break;
       case 'cliquet': A += b.part * Math.min(Math.max(0, b.suelo), b.techo); break;
+      case 'curva': A += evalCurva(b, P); break;
     }
   }
   return A;
@@ -1115,7 +1373,7 @@ function dibujarPerfil(v) {
   const caja = $('#perfil');
   if (!v || !v.bloques.length) { caja.innerHTML = '<p class="nota">Sin pago a vencimiento.</p>'; $('#leyenda').innerHTML = ''; $('#nota-perfil').textContent = ''; return; }
   const W = 560, H = 300, m = { l: 52, r: 16, t: 14, b: 40 };
-  const xMax = Math.max(1.6, v.ko ? v.ko.nivel + 0.2 : 0);
+  const xMax = Math.max(1.6, v.ko ? v.ko.nivel + 0.2 : 0, v.pMaxCurva ? Math.ceil(v.pMaxCurva * 5) / 5 : 0);
   const dos = !!v.ki, tol = 1e-9;
   const series = [{ tocada: false, color: 'var(--acento)', nombre: dos ? 'Sin tocar la barrera' : 'Amortización' }];
   if (dos) series.push({ tocada: true, color: 'var(--tocada)', nombre: 'Barrera tocada' });
@@ -1187,6 +1445,168 @@ function dibujarPerfil(v) {
   $('#nota-perfil').textContent = notas.join(' ');
 }
 
+// ----------------------------------------------------------------------
+// Réplica estática (Carr-Madan): bono + subyacente + puts + calls + digitales
+// ----------------------------------------------------------------------
+function erfc_(x) { // Numerical Recipes (error relativo < 1.2e-7)
+  const z = Math.abs(x), t = 1 / (1 + 0.5 * z);
+  const r = t * Math.exp(-z * z - 1.26551223 + t * (1.00002368 + t * (0.37409196 + t * (0.09678418 + t * (-0.18628806 +
+            t * (0.27886807 + t * (-1.13520398 + t * (1.48851587 + t * (-0.82215223 + t * 0.17087277)))))))));
+  return x >= 0 ? r : 2 - r;
+}
+const Ncdf = x => 0.5 * erfc_(-x / Math.SQRT2);
+function bsOpcion(call, S, K, T, r, q, s) {
+  const F = S * Math.exp((r - q) * T), df = Math.exp(-r * T), sv = s * Math.sqrt(T);
+  if (sv <= 0) return df * Math.max(call ? F - K : K - F, 0);
+  const d1 = (Math.log(F / K) + 0.5 * sv * sv) / sv, d2 = d1 - sv;
+  return call ? df * (F * Ncdf(d1) - K * Ncdf(d2)) : df * (K * Ncdf(-d2) - F * Ncdf(-d1));
+}
+function bsDigital(call, S, K, T, r, q, s) {
+  const F = S * Math.exp((r - q) * T), df = Math.exp(-r * T), sv = s * Math.sqrt(T);
+  if (sv <= 0) return df * ((call ? F >= K : F < K) ? 1 : 0);
+  const d2 = (Math.log(F / K) - 0.5 * sv * sv) / sv;
+  return df * Ncdf(call ? d2 : -d2);
+}
+function motivoNoReplicable(doc, v) {
+  if (v.n_sub !== 1) return 'tiene varios subyacentes: el pago de una cesta no se replica con opciones sobre cada uno por separado';
+  if (doc.autocancelacion) return 'es autocancelable: lo que paga depende de la trayectoria';
+  if (doc.barrera_desactivante) return 'tiene barrera desactivante: depende de la trayectoria';
+  if (v.ki && v.ki.obs !== 'vencimiento' && v.bloques.some(b => b.cond !== 'siempre'))
+    return 'la barrera de capital no se observa solo a vencimiento: depende de la trayectoria';
+  if (v.medio) return 'el rendimiento final es una media de fechas: depende de la trayectoria';
+  if (v.cliquet) return 'incluye un cliquet: depende de cada periodo';
+  for (const c of v.patas) {
+    if (c.tipo === 'rango') return 'tiene un cupón range accrual (una digital por día)';
+    if (c.tipo === 'condicional' && c.memoria) return 'tiene cupones con memoria: cada pago depende de los anteriores';
+  }
+  return '';
+}
+// Perfil lineal a trozos exacto de A(P) (con la barrera observada a vencimiento)
+function perfilExacto(v) {
+  const g = P => amortizacion(v.bloques, P, v.ki ? P <= v.ki.nivel : false);
+  let nodos = [];
+  const add = x => { if (Number.isFinite(x) && Math.abs(x) < 1e20 && x > 0) nodos.push(x); };
+  for (const b of v.bloques) {
+    if (b.tipo === 'curva') b.nodos.forEach(([x]) => add(x));
+    else { add(b.strike); add(b.suelo); add(b.techo); }
+  }
+  if (v.ki && v.bloques.some(b => b.cond !== 'siempre')) add(v.ki.nivel);
+  nodos.sort((a, b) => a - b);
+  nodos = nodos.filter((x, i) => i === 0 || x - nodos[i - 1] > 1e-12);
+  const recta = (a, b, x) => { const x1 = a + 0.25 * (b - a), x2 = a + 0.75 * (b - a), y1 = g(x1), y2 = g(x2); return y2 + (y2 - y1) / (x2 - x1) * (x - x2); };
+  const pend = (a, b) => { const x1 = a + 0.25 * (b - a), x2 = a + 0.75 * (b - a); return (g(x2) - g(x1)) / (x2 - x1); };
+  if (!nodos.length) { const y = g(1); return { nodos: [{ p: 1, izq: y, der: y }], pIzq: pend(0.5, 1.5), pDer: pend(0.5, 1.5), g }; }
+  const f = { nodos: [], g };
+  nodos.forEach((x, k) => {
+    const a = k === 0 ? 0 : nodos[k - 1], b = k + 1 < nodos.length ? nodos[k + 1] : x + Math.max(1, x); // P ≥ 0
+    f.nodos.push({ p: x, izq: recta(a, x, x), der: recta(x, b, x) });
+  });
+  f.pIzq = pend(0, nodos[0]);
+  f.pDer = pend(nodos[nodos.length - 1], nodos[nodos.length - 1] + Math.max(1, nodos[nodos.length - 1]));
+  return f;
+}
+function interpolarPerfil(g, nodos) {
+  const f = { nodos: nodos.map(x => { const y = g(x); return { p: x, izq: y, der: y }; }), g };
+  const n = f.nodos;
+  f.pIzq = n.length > 1 ? (n[1].izq - n[0].der) / (n[1].p - n[0].p) : 0;
+  f.pDer = n.length > 1 ? (n[n.length - 1].izq - n[n.length - 2].der) / (n[n.length - 1].p - n[n.length - 2].p) : 0;
+  return f;
+}
+function pendienteTras(f, i) { return i + 1 < f.nodos.length ? (f.nodos[i + 1].izq - f.nodos[i].der) / (f.nodos[i + 1].p - f.nodos[i].p) : f.pDer; }
+function descomponerPerfil(f, P0) {
+  const d = { P0, base: 0, pend: 0, puts: [], calls: [], dputs: [], dcalls: [] };
+  let ult = -1, enNodo = -1;
+  f.nodos.forEach((n, i) => { if (n.p < P0) ult = i; if (n.p === P0) enNodo = i; });
+  d.pend = ult < 0 ? f.pIzq : pendienteTras(f, ult);
+  if (enNodo >= 0) d.base = f.nodos[enNodo].izq;
+  else if (ult < 0) d.base = f.nodos[0].izq + f.pIzq * (P0 - f.nodos[0].p);
+  else d.base = f.nodos[ult].der + pendienteTras(f, ult) * (P0 - f.nodos[ult].p);
+  const tol = 1e-11;
+  f.nodos.forEach((n, k) => {
+    const ds = pendienteTras(f, k) - (k === 0 ? f.pIzq : pendienteTras(f, k - 1)), J = n.der - n.izq;
+    if (n.p < P0) { if (Math.abs(ds) > tol) d.puts.push([n.p, ds]); if (Math.abs(J) > tol) d.dputs.push([n.p, -J]); }
+    else { if (Math.abs(ds) > tol) d.calls.push([n.p, ds]); if (Math.abs(J) > tol) d.dcalls.push([n.p, J]); }
+  });
+  return d;
+}
+function replicaEn(d, P) {
+  let y = d.base + d.pend * (P - d.P0);
+  for (const [k, w] of d.puts) y += w * Math.max(k - P, 0);
+  for (const [k, w] of d.calls) y += w * Math.max(P - k, 0);
+  for (const [k, w] of d.dputs) if (P < k) y += w;
+  for (const [k, w] of d.dcalls) if (P >= k) y += w;
+  return y;
+}
+function dibujarReplica(doc, v) {
+  const caja = $('#replica');
+  if (!v) { caja.innerHTML = '<p class="nota">Complete los datos para ver la réplica.</p>'; return; }
+  const motivo = motivoNoReplicable(doc, v);
+  if (motivo) {
+    caja.innerHTML = `<p class="nota">Este producto no se puede replicar de forma estática con opciones europeas: ${esc(motivo)}. Su valor sale de la simulación (<code>estructurados valorar</code>).</p>`;
+    return;
+  }
+  const sub = doc.subyacentes[0], sp = estado.subyacentes[0];
+  const nivel = leerNumero(sp.nivel_inicial), spot = leerNumero(sp.spot);
+  const P0 = Number.isFinite(nivel) && nivel > 0 ? spot / nivel : 1;
+  const exacto = perfilExacto(v), g = exacto.g;
+  const paso = +estado.replicaStrikes || 0;
+  let f = exacto, metodo = 'Exacta: el pago es lineal a trozos y basta con opciones en sus nodos.';
+  if (paso > 0) {
+    const nodos = [];
+    for (let k = 1; k * paso <= 3 + 1e-9; k++) nodos.push(Math.round(k * paso * 1e6) / 1e6);
+    f = interpolarPerfil(g, nodos);
+    // Más allá de los strikes extremos, la pendiente local del pago (opción en ese strike)
+    const b = nodos[nodos.length - 1], a = nodos[0], hb = 1e-4 * Math.max(1, b), ha = Math.min(1e-4, a / 2);
+    f.pDer = (g(b + hb) - g(b)) / hb;
+    f.pIzq = (g(a) - g(a - ha)) / ha;
+    metodo = `Solo con strikes cada ${pct(paso * 100)} (como los que cotizan): aproximada.`;
+  }
+  const d = descomponerPerfil(f, P0);
+  // Valor con Black-Scholes si el modelo lo es
+  const T = v.T, r = fr(doc.mercado.tipo_interes), q = fr(sub.dividendos);
+  const bs = sub.modelo.tipo === 'black_scholes' ? fr(sub.modelo.volatilidad) : null;
+  const filas = [];
+  const linea = (inst, k, w, valor) => filas.push({ inst, k, w, valor });
+  const efectivo = d.base - d.pend * d.P0;
+  if (Math.abs(efectivo) > 1e-12) linea('Bono cupón cero', null, efectivo, bs != null ? efectivo * Math.exp(-r * T) : null);
+  if (Math.abs(d.pend) > 1e-12) linea('Subyacente', null, d.pend, bs != null ? d.pend * P0 * Math.exp(-q * T) : null);
+  for (const [k, w] of d.puts) linea('Put', k, w, bs != null ? w * bsOpcion(false, P0, k, T, r, q, bs) : null);
+  for (const [k, w] of d.calls) linea('Call', k, w, bs != null ? w * bsOpcion(true, P0, k, T, r, q, bs) : null);
+  for (const [k, w] of d.dputs) linea('Digital put', k, w, bs != null ? w * bsDigital(false, P0, k, T, r, q, bs) : null);
+  for (const [k, w] of d.dcalls) linea('Digital call', k, w, bs != null ? w * bsDigital(true, P0, k, T, r, q, bs) : null);
+  // Cupones (bonos y digitales en su fecha)
+  let nCup = 0, vCup = 0;
+  for (const c of v.patas) {
+    v.fechas.forEach((t, j) => {
+      const dt = t - (j ? v.fechas[j - 1] : 0);
+      const imp = c.importe != null ? fr(c.importe) : fr(c.tasa_anual) * dt;
+      if (!imp) return;
+      nCup++;
+      if (bs != null) vCup += c.tipo === 'condicional' ? imp * bsDigital(true, P0, fr(c.barrera), t, r, q, bs) : imp * Math.exp(-r * t);
+    });
+  }
+  // Error del pago a vencimiento
+  let emax = 0;
+  const pHi = Math.max(3, (exacto.nodos[exacto.nodos.length - 1] || { p: 1 }).p * 1.2);
+  for (let i = 0; i <= 600; i++) { const P = pHi * i / 600; emax = Math.max(emax, Math.abs(replicaEn(d, P) - g(P))); }
+  const opciones = [[0, 'En los nodos del pago (exacta)'], [0.01, 'Cada 1%'], [0.025, 'Cada 2,5%'], [0.05, 'Cada 5%'], [0.1, 'Cada 10%']];
+  let h = `<div class="replica-cab"><div class="campo"><label for="strikes-replica">Strikes disponibles</label><div class="entrada"><select id="strikes-replica">` +
+    opciones.map(([x, t]) => `<option value="${x}"${x === paso ? ' selected' : ''}>${t}</option>`).join('') + `</select></div></div>`;
+  if (bs != null) {
+    const total = filas.reduce((s, x) => s + x.valor, 0) + vCup;
+    h += `<p class="replica-total">Valor ≈ <strong>${pct(Math.round(total * 1e6) / 1e4)}</strong> del nominal</p>`;
+  }
+  h += `</div><p class="nota">${esc(metodo)} Desarrollo alrededor del spot (P0 = ${pct(Math.round(P0 * 1e4) / 100)}); pesos en % del nominal por cada 100% de pago.</p>`;
+  h += `<div class="tabla"><table><thead><tr><th>Instrumento</th><th>Strike (P)</th><th>Peso</th>${bs != null ? '<th>Valor</th>' : ''}</tr></thead><tbody>` +
+    filas.map(x => `<tr><td>${x.inst}</td><td class="num">${x.k == null ? '—' : pct(Math.round(x.k * 1e6) / 1e4)}</td><td class="num">${pct(Math.round(x.w * 1e6) / 1e4)}</td>${bs != null ? `<td class="num">${pct(Math.round(x.valor * 1e6) / 1e4)}</td>` : ''}</tr>`).join('') +
+    (nCup ? `<tr><td>Cupones (${nCup} pagos)</td><td class="num">—</td><td class="num">bonos / digitales</td>${bs != null ? `<td class="num">${pct(Math.round(vCup * 1e6) / 1e4)}</td>` : ''}</tr>` : '') +
+    `</tbody></table></div>`;
+  h += `<p class="nota">${emax < 1e-9 ? 'La cartera reproduce exactamente el pago a vencimiento.' : `Error máximo del pago a vencimiento: ${pct(Math.round(emax * 1e6) / 1e4)} del nominal (P entre 0% y ${pct(Math.round(pHi * 100))}).`} ` +
+    (bs != null ? 'Valor con Black-Scholes y los datos del subyacente.' : 'Para valorarla con el modelo del subyacente o con precios de mercado: <code>estructurados replicar fichero.json</code> (opción <code>--cadena</code>).') + `</p>`;
+  caja.innerHTML = h;
+  $('#strikes-replica').addEventListener('change', e => { estado.replicaStrikes = +e.target.value; actualizar(); $('#strikes-replica')?.focus(); });
+}
+
 function dibujarCalendario(v) {
   const caja = $('#calendario');
   if (!v) { caja.innerHTML = '<p class="nota" style="padding:8px">Indique un vencimiento válido.</p>'; return; }
@@ -1238,6 +1658,7 @@ function actualizar() {
   const v = err.size ? null : vistaDe(docActual);
   dibujarResumen(docActual, v || vistaDe(docActual));
   dibujarPerfil(v);
+  dibujarReplica(docActual, v);
   dibujarCalendario(v || vistaDe(docActual));
   $('#json').textContent = serializar(docActual) + '\n';
 }
@@ -1248,6 +1669,7 @@ function etiquetaDe(ruta) {
     return (sub ? `Subyacente ${+sub[1] + 1} · ` : '') + e.textContent;
   }
   if (ruta === 'correlacion.matriz') return 'Correlación';
+  if (ruta === 'dibujo.puntos') return 'Pago dibujado';
   if (ruta.startsWith('correlacion.parejas')) return 'Correlación por parejas';
   return ruta;
 }
@@ -1259,6 +1681,13 @@ const form = $('#formulario');
 form.addEventListener('submit', e => e.preventDefault());
 form.addEventListener('input', e => {
   const t = e.target;
+  if (t.dataset && t.dataset.nodo != null) {
+    estado.dibujo.puntos[+t.dataset.nodo][1] = leerNumero(t.value);
+    t.classList.toggle('mal', !Number.isFinite(leerNumero(t.value)));
+    redibujarLienzo();
+    actualizar();
+    return;
+  }
   if (!t.dataset || !t.dataset.ruta) return;
   if (t.dataset.estructural) return; // se trata en 'change'
   const valor = t.type === 'checkbox' ? t.checked : t.value;
@@ -1291,6 +1720,14 @@ form.addEventListener('change', e => {
     $(`#c-subyacentes-${m[1]}-modelo`)?.focus();
     return;
   }
+  if (t.dataset.ruta.startsWith('dibujo.') && t.dataset.estructural) {
+    const d = estado.dibujo, id = t.id;
+    for (const k of ['paso', 'pmax', 'amax', 'amin']) d[k] = +d[k];
+    if (t.dataset.ruta === 'dibujo.paso' || t.dataset.ruta === 'dibujo.pmax') reajustarRejilla();
+    renderDibujo(); actualizar();
+    document.getElementById(id)?.focus();
+    return;
+  }
   if (t.dataset.estructural) {
     const id = t.id;
     if (t.dataset.ruta.startsWith('pers.')) renderPersonalizado(); else renderCaracteristicas();
@@ -1310,6 +1747,13 @@ form.addEventListener('click', e => {
     estado.subyacentesTocados = true;
     renderSubyacentes(); actualizar(); return;
   }
+  if (b.dataset.accion === 'forma') {
+    const d = estado.dibujo, f = b.dataset.forma;
+    d.puntos = rejillaDibujo(d).map(p => [p, Math.round(formaEjemplo(f, p) * 10) / 10]);
+    if (f === 'twin' || f === 'mariposa') d.extrapolacion = 'constante';
+    renderDibujo(); actualizar(); return;
+  }
+  if (b.dataset.accion === 'strikes-replica') return;
   switch (b.dataset.accion) {
     case 'anadir-cupon': s.cupones.push({ tipo: 'fijo', importe: 1, tasa: 4, barrera: 80, memoria: false, inf: 90, sup: 110 }); break;
     case 'quitar-cupon': s.cupones.splice(+b.dataset.i, 1); break;
@@ -1414,7 +1858,7 @@ $('#importar').addEventListener('change', e => {
         aviso('Este fichero no se creó con el diseñador: ábralo con un editor de texto o compruébelo con «estructurados mostrar».', 'mal');
         return;
       }
-      estado = Object.assign(estadoInicial(guardado.plantilla), guardado);
+      estado = Object.assign(estadoInicial(guardado.plantilla), guardado, { replicaStrikes: 0 });
       renderTodo();
       aviso('Abierto ' + f.name + '.', 'ok');
     } catch (err) {

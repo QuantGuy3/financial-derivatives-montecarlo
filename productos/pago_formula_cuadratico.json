@@ -1,0 +1,16 @@
+{
+  "formato": "producto-estructurado/1",
+  "plantilla": "pago_a_medida",
+  "nombre": "Nota con pago cuadrático (apuesta a un movimiento fuerte)",
+  "descripcion": "Devuelve el 95% del nominal más la mitad del cuadrado del movimiento del índice, en cualquier dirección: gana con subidas o caídas grandes. El pago es una fórmula en P; 'estructurados replicar' la construye con un abanico de puts y calls (como un swap de varianza).",
+  "nominal": 1000,
+  "moneda": "USD",
+  "vencimiento": "1A",
+  "mercado": {"tipo_interes": "4%"},
+  "subyacentes": [
+    {"nombre": "SPX", "spot": 5600, "dividendos": "1.5%",
+     "modelo": {"tipo": "heston", "vol_inicial": "18%", "kappa": 2, "vol_largo_plazo": "20%", "xi": 0.6, "rho": -0.7}}
+  ],
+  "amortizacion_final": [{"tipo": "formula", "expresion": "95% + 50% * (P - 1)^2"}],
+  "simulacion": {"metodo": "auto", "error_objetivo": "0.02%"}
+}

@@ -1,0 +1,81 @@
+{
+  "formato": "producto-estructurado/1",
+  "plantilla": "dibujado",
+  "nombre": "Pago dibujado: bonus con tope (europeo)",
+  "descripcion": "Pago a vencimiento dibujado en el diseñador: replica al índice por debajo del 70%, garantiza un bonus del 120% entre el 70% y el 120% y participa en la subida hasta un tope del 150%. El salto del 70% se dibuja como una rampa de un nodo.",
+  "nominal": 1000,
+  "moneda": "EUR",
+  "vencimiento": "1A",
+  "mercado": {
+    "tipo_interes": "3%"
+  },
+  "subyacentes": [
+    {
+      "nombre": "SX5E",
+      "spot": 4800,
+      "dividendos": "3%",
+      "modelo": {
+        "tipo": "heston",
+        "vol_inicial": "20%",
+        "kappa": 1.5,
+        "vol_largo_plazo": "20%",
+        "xi": 0.5,
+        "rho": -0.7
+      }
+    }
+  ],
+  "amortizacion_final": [
+    {
+      "tipo": "curva",
+      "puntos": [
+        ["0%", "0%"],
+        ["5%", "5%"],
+        ["10%", "10%"],
+        ["15%", "15%"],
+        ["20%", "20%"],
+        ["25%", "25%"],
+        ["30%", "30%"],
+        ["35%", "35%"],
+        ["40%", "40%"],
+        ["45%", "45%"],
+        ["50%", "50%"],
+        ["55%", "55%"],
+        ["60%", "60%"],
+        ["65%", "65%"],
+        ["70%", "120%"],
+        ["75%", "120%"],
+        ["80%", "120%"],
+        ["85%", "120%"],
+        ["90%", "120%"],
+        ["95%", "120%"],
+        ["100%", "120%"],
+        ["105%", "120%"],
+        ["110%", "120%"],
+        ["115%", "120%"],
+        ["120%", "120%"],
+        ["125%", "125%"],
+        ["130%", "130%"],
+        ["135%", "135%"],
+        ["140%", "140%"],
+        ["145%", "145%"],
+        ["150%", "150%"],
+        ["155%", "150%"],
+        ["160%", "150%"],
+        ["165%", "150%"],
+        ["170%", "150%"],
+        ["175%", "150%"],
+        ["180%", "150%"],
+        ["185%", "150%"],
+        ["190%", "150%"],
+        ["195%", "150%"],
+        ["200%", "150%"]
+      ],
+      "extrapolacion": "constante"
+    }
+  ],
+  "simulacion": {
+    "metodo": "auto",
+    "error_objetivo": "0.05%"
+  },
+  "_disenador": {"version":1,"estado":{"plantilla":"dibujado","general":{"nombre":"Pago dibujado: bonus con tope (europeo)","descripcion":"Pago a vencimiento dibujado en el diseñador: replica al índice por debajo del 70%, garantiza un bonus del 120% entre el 70% y el 120% y participa en la subida hasta un tope del 150%. El salto del 70% se dibuja como una rampa de un nodo.","nominal":1000,"moneda":"EUR","vencimiento":"1A","tipo_interes":3},"subyacentes":[{"nombre":"SX5E","spot":4800,"nivel_inicial":"","dividendos":3,"modelo":"heston","params":{"vol_inicial":20,"kappa":1.5,"vol_largo_plazo":20,"xi":0.5,"rho":-0.7}}],"subyacentesTocados":true,"correlacion":{"modo":"comun","comun":60,"parejas":{}},"cesta":"peor","resp":{},"pers":{"frecuencia":"trimestral","cupones":[{"tipo":"condicional","importe":2,"tasa":5,"barrera":70,"memoria":true,"inf":90,"sup":110}],"autocall":{"activa":true,"barrera":100,"escalon":0,"desde":2,"prima":0,"acumulativa":false},"ki":{"activa":true,"nivel":60,"observacion":"vencimiento"},"ko":{"activa":false,"nivel":130,"observacion":"continua","importe":100,"pago":"vencimiento"},"rendimiento":"final","bloques":[{"tipo":"fijo","importe":100,"condicion":"siempre"},{"tipo":"put_vendida","strike":100,"participacion":100,"condicion":"barrera_tocada"}]},"dibujo":{"paso":5,"pmin":0,"pmax":200,"amin":0,"amax":200,"suavizar":true,"extrapolacion":"constante","puntos":[[0,0],[5,5],[10,10],[15,15],[20,20],[25,25],[30,30],[35,35],[40,40],[45,45],[50,50],[55,55],[60,60],[65,65],[70,120],[75,120],[80,120],[85,120],[90,120],[95,120],[100,120],[105,120],[110,120],[115,120],[120,120],[125,125],[130,130],[135,135],[140,140],[145,145],[150,150],[155,150],[160,150],[165,150],[170,150],[175,150],[180,150],[185,150],[190,150],[195,150],[200,150]]},"simulacion":{"metodo":"auto","error":0.05}}}
+}

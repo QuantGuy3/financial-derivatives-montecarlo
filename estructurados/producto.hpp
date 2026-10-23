@@ -89,7 +89,13 @@ struct Bloque {
     double importe = 0.0, part = 1.0, strike = 1.0;
     double suelo = -HD_INFINITO, techo = HD_INFINITO;
     double suelo_local = -HD_INFINITO, techo_local = HD_INFINITO; // cliquet
+    int formula_ini = 0, formula_len = 0; // FORMULA: código en Producto::formulas
     std::string descripcion;       // texto legible ("put vendida a strike 100%"...)
+    // Un componente "curva" del JSON se descompone de forma exacta en varios bloques
+    // elementales (fijo + lineal + calls + digitales); solo el primero se muestra en
+    // la ficha, con la descripción de la curva.
+    bool oculto = false;
+    int componente = -1;           // índice del componente del JSON del que procede
 };
 
 struct ConfigSimulacion {
@@ -133,6 +139,8 @@ struct Producto {
     double ko_importe = 1.0; bool ko_pago_venc = true;
     bool rend_medio = false;
     std::vector<Bloque> bloques;
+    std::vector<InstrFormula<double>> formulas; // código de los componentes "formula"
+    std::vector<std::string> textos_formula;    // expresión original de cada componente "formula"
     bool ki_inicial = false;
     std::vector<double> memoria_inicial;  // por pata de cupón
     ConfigSimulacion sim;

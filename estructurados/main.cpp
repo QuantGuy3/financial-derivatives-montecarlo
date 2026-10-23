@@ -5,11 +5,16 @@
 //   estructurados plantillas | modelos        catálogos disponibles
 //   estructurados mostrar <fichero.json>      valida y muestra la ficha
 //   estructurados valorar <fichero.json> [opciones]
+//   estructurados replicar <fichero.json> [opciones]  réplica estática con opciones
 
 #include "asistente.hpp"
+#include "cotizaciones.hpp"
 #include "plantillas.hpp"
 #include "producto.hpp"
+#include "replicacion.hpp"
 #include "valoracion.hpp"
+
+#include <cmath>
 
 #include <cstring>
 #include <fstream>
@@ -29,6 +34,7 @@ void uso(std::ostream& os) {
           "  estructurados modelos                       Lista los modelos y sus parámetros\n"
           "  estructurados mostrar <fichero.json>        Valida el producto y muestra su ficha\n"
           "  estructurados valorar <fichero.json> [opciones]\n"
+          "  estructurados replicar <fichero.json> [opciones]  Réplica estática con bonos, subyacente y opciones\n"
           "\nOpciones de valoración (prevalecen sobre la sección \"simulacion\" del fichero):\n"
           "  --metodo auto|mc|qmc     --dispositivo auto|gpu|cpu   (--cpu / --gpu)\n"
           "  --error 0.05%            error estándar objetivo, en % del nominal\n"
@@ -37,7 +43,18 @@ void uso(std::ostream& os) {
           "  --pasos N|auto           pasos de simulación por año  --semilla S\n"
           "  --doble | --simple       precisión en GPU             --hilos H      hilos en CPU\n"
           "  --griegas                delta, gamma, vega y rho     --salida res.json  guarda resultados\n"
-          "  --sin-ficha              no muestra la ficha del producto antes de valorar\n";
+          "  --sin-ficha              no muestra la ficha del producto antes de valorar\n"
+          "\nOpciones de la réplica estática:\n"
+          "  --cadena opciones.csv    usa los strikes y precios de una cadena de opciones cotizada\n"
+          "  --volumen-min N          (con --cadena) solo opciones con volumen >= N contratos\n"
+          "  --pesos interpolacion|curvatura   pesos de las opciones cotizadas (por defecto interpolación)\n"
+          "  --fecha AAAA-MM-DD       fecha de los datos de la cadena, si sus vencimientos son fechas\n"
+          "  --paso 5%                rejilla de strikes para pagos con fórmulas\n"
+          "  --rango 50%:200%         strikes que se usan y tramo donde se mide el error\n"
+          "  --precios-mc             valora las opciones por Monte Carlo con el modelo del subyacente\n"
+          "  --comparar               valora también el producto por simulación y compara\n"
+          "  --csv cartera.csv        guarda la cartera      --perfil perfil.csv   pago objetivo y réplica\n"
+          "  --salida replica.json    guarda la réplica en JSON\n";
 }
 
 // Ajusta un texto a un ancho de línea (cortando por palabras, sin partir UTF-8)
@@ -185,6 +202,82 @@ int cmd_valorar(const std::vector<std::string>& a) {
     return valorar_producto(p, o, griegas, salida);
 }
 
+int cmd_replicar(const std::vector<std::string>& a) {
+    if (a.empty()) { uso(std::cerr); return 2; }
+    OpcionesReplica o;
+    std::string ruta_cadena, csv, perfil, salida, fecha;
+    bool comparar = false;
+    for (size_t i = 1; i < a.size(); ++i) {
+        const std::string& k = a[i];
+        auto sig = [&]() -> const std::string& {
+            if (i + 1 >= a.size()) throw std::runtime_error("falta el valor de la opción " + k);
+            return a[++i];
+        };
+        if (k == "--cadena") ruta_cadena = sig();
+        else if (k == "--volumen-min" || k == "--volumen") o.volumen_min = texto_a_real(sig());
+        else if (k == "--pesos") {
+            o.pesos = sig();
+            if (o.pesos != "interpolacion" && o.pesos != "curvatura")
+                throw std::runtime_error("--pesos debe ser interpolacion o curvatura");
+        }
+        else if (k == "--fecha") fecha = sig();
+        else if (k == "--paso") o.paso = texto_a_real(sig());
+        else if (k == "--rango") {
+            std::string v = sig();
+            size_t dp = v.find(':');
+            if (dp == std::string::npos) throw std::runtime_error("--rango se escribe mínimo:máximo, p. ej. 50%:200%");
+            o.p_min = texto_a_real(v.substr(0, dp));
+            o.p_max = texto_a_real(v.substr(dp + 1));
+            if (!(o.p_max > o.p_min) || o.p_min < 0) throw std::runtime_error("--rango no válido");
+        }
+        else if (k == "--precios-mc") o.precios_mc = true;
+        else if (k == "--trayectorias") o.mc.trayectorias = (long long)texto_a_real(sig());
+        else if (k == "--comparar") comparar = true;
+        else if (k == "--csv") csv = sig();
+        else if (k == "--perfil") perfil = sig();
+        else if (k == "--salida") salida = sig();
+        else throw std::runtime_error("opción desconocida: " + k);
+    }
+    json::Valor doc;
+    Producto p = cargar(a[0], &doc);
+    CadenaOpciones cadena;
+    if (!ruta_cadena.empty()) {
+        int dias = -1;
+        if (!fecha.empty() && !texto_a_fecha(fecha, dias)) throw std::runtime_error("--fecha no válida (AAAA-MM-DD)");
+        if (dias < 0) {
+            if (const json::Valor* fv = doc.buscar("fecha_valoracion")) texto_a_fecha(fv->texto(), dias);
+        }
+        cadena = leer_cadena_csv(ruta_cadena, dias);
+        for (const auto& av : cadena.avisos) std::cout << " ! " << av << "\n";
+        if (cadena.spot > 0 && std::fabs(cadena.spot / p.activos[0].spot - 1.0) > 0.02)
+            std::cout << " ! el spot de la cadena (" << fmt(cadena.spot, 2) << ") y el del producto ("
+                      << fmt(p.activos[0].spot, 2) << ") difieren más de un 2%\n";
+        o.cadena = &cadena;
+    }
+    Replica r = replicar(p, o);
+    imprimir_replica(std::cout, p, r);
+    if (comparar) {
+        OpcionesValoracion ov;
+        ov.metodo = "auto"; // QMC si el motor lo admite; si no, MC
+        ResultadoValoracion rv = valorar(p, ov, nullptr);
+        double vr = r.valor / p.nominal;
+        std::cout << " Comparación con la valoración por simulación (" << rv.metodo << ", " << rv.motor << ")\n"
+                  << "   Simulación ...... " << porcentaje(rv.precio, 4) << " ± " << porcentaje(rv.error, 4)
+                  << " (error estándar)\n"
+                  << "   Réplica ......... " << porcentaje(vr, 4) << "\n"
+                  << "   Diferencia ...... " << porcentaje(vr - rv.precio, 4);
+        if (rv.error > 0) std::cout << " (" << fmt((vr - rv.precio) / rv.error, 2) << " errores estándar)";
+        std::cout << "\n";
+    }
+    if (!csv.empty()) { guardar_replica_csv(csv, r); std::cout << "Cartera guardada en " << csv << "\n"; }
+    if (!perfil.empty()) { guardar_perfil_csv(perfil, r); std::cout << "Perfil guardado en " << perfil << "\n"; }
+    if (!salida.empty()) {
+        json::escribir_fichero(salida, replica_a_json(p, r));
+        std::cout << "Réplica guardada en " << salida << "\n";
+    }
+    return 0;
+}
+
 int cmd_nuevo(const std::vector<std::string>& a) {
     std::string ruta;
     json::Valor doc = asistente_nuevo_producto(std::cin, std::cout, a.empty() ? "" : a[0], &ruta);
@@ -225,6 +318,7 @@ int main(int argc, char** argv) {
         if (cmd == "modelos") return cmd_modelos();
         if (cmd == "mostrar" || cmd == "ficha") return cmd_mostrar(resto);
         if (cmd == "valorar") return cmd_valorar(resto);
+        if (cmd == "replicar" || cmd == "replica") return cmd_replicar(resto);
         std::cerr << "Orden desconocida: " << cmd << "\n\n";
         uso(std::cerr);
         return 2;

@@ -46,6 +46,8 @@ HD_INLINE float  min_(float a, float b)   { return fminf(a, b); }
 HD_INLINE double min_(double a, double b) { return fmin(a, b); }
 HD_INLINE float  max_(float a, float b)   { return fmaxf(a, b); }
 HD_INLINE double max_(double a, double b) { return fmax(a, b); }
+HD_INLINE float  pow_(float a, float b)   { return powf(a, b); }
+HD_INLINE double pow_(double a, double b) { return pow(a, b); }
 
 template<typename Real>
 HD_INLINE Real clamp_(Real x, Real lo, Real hi) { return min_(max_(x, lo), hi); }

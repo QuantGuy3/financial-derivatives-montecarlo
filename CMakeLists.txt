@@ -44,7 +44,12 @@ target_include_directories(mc_referencias PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 # ------------------------------------------------------------------------- #
 set(EST_FUENTES
     estructurados/json.cpp
+    estructurados/expresion.cpp
     estructurados/producto.cpp
+    estructurados/perfil.cpp
+    estructurados/vanilla.cpp
+    estructurados/cotizaciones.cpp
+    estructurados/replicacion.cpp
     estructurados/ficha.cpp
     estructurados/plantillas.cpp
     estructurados/asistente.cpp

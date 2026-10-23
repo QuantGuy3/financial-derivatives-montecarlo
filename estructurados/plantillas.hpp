@@ -28,7 +28,9 @@ enum class TipoDato {
     Opcion,      // una de `opciones`
     Texto,
     Frecuencia,  // mensual, trimestral, semestral, anual, "3M"...
-    Observacion  // vencimiento, fechas, diaria, continua
+    Observacion, // vencimiento, fechas, diaria, continua
+    Formula,     // expresión en P: "100% + 50% * max(P - 1, 0)"
+    Puntos       // curva P:pago, p. ej. "0:90 90:90 100:100 130:135"
 };
 
 struct Pregunta {
