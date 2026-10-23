@@ -1,0 +1,25 @@
+{
+  "formato": "producto-estructurado/1",
+  "plantilla": "reverse_convertible",
+  "nombre": "Barrier reverse convertible sobre una acción (1 año, cupón 9%)",
+  "descripcion": "Cupón fijo del 9% anual pagado trimestralmente. Si la acción cierra algún día por debajo del 65% de su nivel inicial y a vencimiento está por debajo del 100%, se recibe el nominal multiplicado por el rendimiento de la acción. Modelo de Merton (la acción puede caer de golpe).",
+  "nominal": 1000,
+  "moneda": "EUR",
+  "vencimiento": "1A",
+  "mercado": {"tipo_interes": "3%"},
+  "subyacentes": [
+    {
+      "nombre": "ACCION",
+      "spot": 42.5,
+      "dividendos": "2.5%",
+      "modelo": {"tipo": "merton", "volatilidad": "22%", "lambda": 0.6, "media_salto": -0.12, "vol_salto": 0.15}
+    }
+  ],
+  "observaciones": {"frecuencia": "trimestral"},
+  "cupones": {"tipo": "fijo", "tasa_anual": "9%"},
+  "barrera_capital": {"nivel": "65%", "observacion": "diaria"},
+  "amortizacion_final": [
+    {"tipo": "fijo", "importe": "100%"},
+    {"tipo": "put_vendida", "strike": "100%", "condicion": "barrera_tocada"}
+  ]
+}

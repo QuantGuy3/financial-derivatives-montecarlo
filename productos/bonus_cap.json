@@ -1,0 +1,24 @@
+{
+  "formato": "producto-estructurado/1",
+  "plantilla": "bonus",
+  "nombre": "Certificado bonus cap 125% / barrera 70% (2 años)",
+  "descripcion": "Si la acción nunca toca el 70% de su nivel inicial, se recibe al menos el 125% (y la subida hasta el tope del 145%). Si lo toca, se replica la acción hasta el tope. Modelo NIG (colas gruesas).",
+  "nominal": 1000,
+  "moneda": "EUR",
+  "vencimiento": "2A",
+  "mercado": {"tipo_interes": "3%"},
+  "subyacentes": [
+    {
+      "nombre": "ACCION",
+      "spot": 120,
+      "dividendos": "1%",
+      "modelo": {"tipo": "nig", "sigma": "24%", "theta": -0.15, "kappa": 0.4}
+    }
+  ],
+  "barrera_capital": {"nivel": "70%", "observacion": "continua"},
+  "amortizacion_final": [
+    {"tipo": "fijo", "importe": "125%", "condicion": "barrera_no_tocada"},
+    {"tipo": "call", "strike": "125%", "techo": "145%", "condicion": "barrera_no_tocada"},
+    {"tipo": "lineal", "techo": "145%", "condicion": "barrera_tocada"}
+  ]
+}

@@ -67,8 +67,69 @@ struct MultiDupireParams {
     std::vector<double> L;       // Cholesky n×n, fila principal
 };
 
+// ------------------------------------------------------------------------- //
+// Modelos añadidos (se simulan en logaritmo: el paso es exacto en Merton y   //
+// NIG; Bates usa truncamiento completo en la varianza). `mu` es la deriva    //
+// riesgo neutro r - q, igual que en los modelos anteriores.                 //
+// ------------------------------------------------------------------------- //
+
+struct MertonParams {
+    // dS/S = (μ - λ·k̄)·dt + σ·dW + (e^J - 1)·dN,  J ~ N(μ_J, σ_J²),  N ~ Poisson(λ)
+    // k̄ = E[e^J - 1] = exp(μ_J + σ_J²/2) - 1 (compensador de los saltos)
+    double S0     = 100.0;
+    double mu     = 0.05;
+    double sigma  = 0.15;
+    double lambda = 0.5;
+    double muJ    = -0.10;
+    double sigmaJ = 0.15;
+    double T      = 1.0;
+};
+
+struct BatesParams {
+    // Heston con saltos de Merton:
+    // dS/S = (μ - λ·k̄)·dt + √v·dW₁ + (e^J - 1)·dN
+    // dv   = κ(θ - v)·dt + ξ·√v·dW₂,   d<W₁,W₂> = ρ·dt
+    double S0     = 100.0;
+    double mu     = 0.05;
+    double kappa  = 1.5;
+    double theta  = 0.04;
+    double xi     = 0.5;
+    double rho    = -0.7;
+    double v0     = 0.04;
+    double lambda = 0.5;
+    double muJ    = -0.10;
+    double sigmaJ = 0.15;
+    double T      = 1.0;
+};
+
+struct SABRParams {
+    // dF = α·F^β·dW₁ (sobre el forward), dα = ν·α·dW₂, d<W₁,W₂> = ρ·dt.
+    // `alpha` es la volatilidad en el forward inicial: σ_ef = α·(F/F₀)^(β-1),
+    // es decir, α_Hagan = alpha·F₀^(1-β).
+    double S0    = 100.0;
+    double mu    = 0.05;
+    double alpha = 0.20;
+    double beta  = 0.7;
+    double nu    = 0.4;
+    double rho   = -0.5;
+    double T     = 1.0;
+};
+
+struct NIGParams {
+    // Normal Inverse Gaussian (Cont-Tankov): X_t = θ·G_t + σ·W(G_t) con G un
+    // subordinador IG de media t y varianza κ·t; S_t = S₀·exp((μ + ω)t + X_t),
+    // ω = -(1 - √(1 - σ²κ - 2θκ))/κ (corrección de martingala).
+    double S0    = 100.0;
+    double mu    = 0.05;
+    double sigma = 0.20;
+    double theta = -0.10;
+    double kappa = 0.20;
+    double T     = 1.0;
+};
+
 using ModelVariant = std::variant<
-    GBMParams, HestonParams, DupireLocalParams, MultiDupireParams>;
+    GBMParams, HestonParams, DupireLocalParams, MultiDupireParams,
+    MertonParams, BatesParams, SABRParams, NIGParams>;
 
 // ---------------------------------//
 // Auxiliares para acceder a datos  //
@@ -82,6 +143,12 @@ inline int model_noise_dim(const ModelVariant& mv) {
         if constexpr (std::is_same_v<T, HestonParams>)        return 2;
         if constexpr (std::is_same_v<T, DupireLocalParams>)   return 1;
         if constexpr (std::is_same_v<T, MultiDupireParams>)   return m.n;
+        // Normales por paso: principal + extras (nº de saltos y tamaño, varianza,
+        // vol SABR, o las dos del muestreo IG de la NIG)
+        if constexpr (std::is_same_v<T, MertonParams>)        return 3;
+        if constexpr (std::is_same_v<T, BatesParams>)         return 4;
+        if constexpr (std::is_same_v<T, SABRParams>)          return 2;
+        if constexpr (std::is_same_v<T, NIGParams>)           return 3;
         return 1;
     }, mv);
 }

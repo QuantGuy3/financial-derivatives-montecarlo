@@ -2,6 +2,7 @@
 // Objetivo: NVIDIA A-100 (sm_80). Requiere CUDA 11+, cuBLAS, cuRAND, CUB.
 
 #include "methods_cuda.cuh"
+#include "modelos_hd.hpp" // saltos compuestos de Poisson y subordinador IG (compartidos con CPU)
 #include <cuda_runtime.h>
 #include <cuda_fp16.h>
 #include <curand.h>
@@ -208,8 +209,17 @@ template<typename... Args> static void mc_println(const std::string& fmt, Args&&
 enum class PayoffKind : int { European=0, Asian=1, GeomAsian=2, Lookback=3, Barrier=4, Basket=5 };
 static constexpr int N_PAYOFFS = 6;
 
-enum class ModelKind : int { GBM=0, Heston=1, Dupire=2, MultiDupire=3 };
-static constexpr int N_MODELS = 4;
+enum class ModelKind : int { GBM=0, Heston=1, Dupire=2, MultiDupire=3,
+                             Merton=4, Bates=5, SABR=6, NIG=7 };
+static constexpr int N_MODELS = 8;
+
+// Modelos que reciben en el kernel MLMC las normales Z SIN escalar (las
+// combinan y escalan ellos mismos): Heston y los modelos nuevos, que además
+// usan algunas normales como uniformes vía Φ(z) (nº de saltos, muestreo IG).
+static bool ruido_sin_escalar(ModelKind mk) {
+    return mk == ModelKind::Heston || mk == ModelKind::Merton || mk == ModelKind::Bates ||
+           mk == ModelKind::SABR || mk == ModelKind::NIG;
+}
 
 struct KernelParams {
     // Común a todos los modelos
@@ -244,6 +254,22 @@ struct KernelParams {
 
     // Multi-activo
     int n_assets;
+
+    // Saltos de Merton / Bates: λ, μ_J, σ_J y compensador λ·k̄
+    float lam, muJ, sigJ, compJ;
+
+    // SABR (α inicial en v0): β-1, ν, ρ y √(1-ρ²)
+    float sabr_bm1, sabr_nu, sabr_rho, sabr_rhoc;
+
+    // NIG (σ en sigma): θ, κ y corrección de martingala ω
+    float nig_theta, nig_kappa, nig_omega;
+
+    // Tope de la volatilidad instantánea (SABR)
+    float vol_max;
+
+    // √h y 1/√h del paso de MC de un nivel (los kernels de un nivel reciben
+    // dW = Z·√h y los modelos nuevos recuperan Z = dW/√h)
+    float sqrt_h, inv_sqrt_h;
 };
 
 __constant__ KernelParams c_p;
@@ -298,6 +324,49 @@ __device__ __forceinline__
 float d_euler_dupire(float S, float dw, float t, float h) {
     float sigma_loc = c_p.sigma0 * expf(-c_p.alpha * t) * powf(S / c_p.S0, c_p.beta_d - 1.0f);
     return S + c_p.mu * S * h + sigma_loc * S * dw;
+}
+
+// ---------------------------------------------------------------------- //
+// Modelos añadidos. Se avanzan en logaritmo (S ← S·e^{Δx}): el paso es    //
+// exacto para Merton y NIG con cualquier h, y en Bates/SABR evita precios //
+// negativos. `dw` es el incremento browniano ya escalado (Z·√h) y `J`/`G` //
+// el salto o el incremento del subordinador del paso, de modo que el      //
+// nivel grueso de MLMC pueda reutilizar las sumas de los pasos finos.     //
+// ---------------------------------------------------------------------- //
+
+// Merton: x += (μ - λk̄ - σ²/2)·h + σ·dW + J
+__device__ __forceinline__
+float d_paso_merton(float S, float dw, float J, float h) {
+    return S * expf((c_p.mu - c_p.compJ - 0.5f * c_p.sigma * c_p.sigma) * h + c_p.sigma * dw + J);
+}
+
+// Bates: Heston (truncamiento completo) + saltos; dw2 ya correlacionado con dw1
+__device__ __forceinline__
+void d_paso_bates(float& S, float& V, float dw1, float dw2, float J, float h) {
+    float vp = fmaxf(V, 0.0f);
+    float sv = sqrtf(vp);
+    S = S * expf((c_p.mu - c_p.compJ - 0.5f * vp) * h + sv * dw1 + J);
+    V = V + c_p.kappa * (c_p.theta - vp) * h + c_p.xi * sv * dw2;
+}
+
+// SABR: σ_ef = α·(F_t/F_0)^(β-1) con F_t/F_0 = S·e^{-μt}/S₀; α es un GBM sin deriva
+__device__ __forceinline__
+void d_paso_sabr(float& S, float& A, float dw1, float dw2, float t, float h) {
+    float lr = logf(S / c_p.S0) - c_p.mu * t;
+    float se = fminf(A * expf(c_p.sabr_bm1 * lr), c_p.vol_max);
+    S = S * expf((c_p.mu - 0.5f * se * se) * h + se * dw1);
+    A = A * expf(c_p.sabr_nu * dw2 - 0.5f * c_p.sabr_nu * c_p.sabr_nu * h);
+}
+
+// NIG: x += (μ + ω)·h + dX, con dX = θ·G + σ·√G·Z la parte de Lévy del paso
+__device__ __forceinline__
+float d_paso_nig(float S, float dX, float h) {
+    return S * expf((c_p.mu + c_p.nig_omega) * h + dX);
+}
+__device__ __forceinline__
+float d_incremento_nig(float zw, float zig, float zu, float h) {
+    float G = ig_incremento<float>(h, c_p.nig_kappa, zig, zu);
+    return c_p.nig_theta * G + c_p.sigma * sqrtf(G) * zw;
 }
 
 
@@ -411,6 +480,32 @@ void d_step(float& S, float& V, const float* __restrict__ d_dW,
         float dw1 = z1; // L[0][0]=1, L[0][1]=0
         float dw2 = c_p.L_hes[2] * z1 + c_p.L_hes[3] * z2; // L[1][0]=rho, L[1][1]=sqrt(1-rho²)
         d_euler_heston(S, V, dw1, dw2, c_p.h);
+    } else if constexpr (MK == ModelKind::Merton) {
+        // Aquí d_dW = Z·√h; las normales que se usan como uniformes (nº de saltos)
+        // o como tamaño del salto se recuperan como Z = dW/√h.
+        float dw = d_dW[(k * 3 + 0) * N_paths + p];
+        float zn = d_dW[(k * 3 + 1) * N_paths + p] * c_p.inv_sqrt_h;
+        float zj = d_dW[(k * 3 + 2) * N_paths + p] * c_p.inv_sqrt_h;
+        float J = salto_compuesto<float>(c_p.lam * c_p.h, c_p.muJ, c_p.sigJ, zn, zj);
+        S = d_paso_merton(S, dw, J, c_p.h);
+    } else if constexpr (MK == ModelKind::Bates) {
+        float dw1 = d_dW[(k * 4 + 0) * N_paths + p];
+        float dz2 = d_dW[(k * 4 + 1) * N_paths + p];
+        float zn  = d_dW[(k * 4 + 2) * N_paths + p] * c_p.inv_sqrt_h;
+        float zj  = d_dW[(k * 4 + 3) * N_paths + p] * c_p.inv_sqrt_h;
+        float dw2 = c_p.L_hes[2] * dw1 + c_p.L_hes[3] * dz2;
+        float J = salto_compuesto<float>(c_p.lam * c_p.h, c_p.muJ, c_p.sigJ, zn, zj);
+        d_paso_bates(S, V, dw1, dw2, J, c_p.h);
+    } else if constexpr (MK == ModelKind::SABR) {
+        float dw1 = d_dW[(k * 2 + 0) * N_paths + p];
+        float dz2 = d_dW[(k * 2 + 1) * N_paths + p];
+        float dw2 = c_p.sabr_rho * dw1 + c_p.sabr_rhoc * dz2;
+        d_paso_sabr(S, V, dw1, dw2, k * c_p.h, c_p.h);
+    } else if constexpr (MK == ModelKind::NIG) {
+        float zw  = d_dW[(k * 3 + 0) * N_paths + p] * c_p.inv_sqrt_h;
+        float zig = d_dW[(k * 3 + 1) * N_paths + p] * c_p.inv_sqrt_h;
+        float zu  = d_dW[(k * 3 + 2) * N_paths + p] * c_p.inv_sqrt_h;
+        S = d_paso_nig(S, d_incremento_nig(zw, zig, zu, c_p.h), c_p.h);
     }
     // MultiDupire se maneja en kernel_multi_dupire; no llega aquí
 }
@@ -465,7 +560,10 @@ __global__ void kernel_mlmc(
     float Vf = (p < N_paths) ? c_p.v0 : 0.0f;
     float Sc = Sf, Vc = Vf;
     float run_f = d_running_init<PK>(), run_c = run_f;
-    float acc1 = 0.0f, acc2 = 0.0f;
+    // acc1/acc2: incrementos brownianos acumulados del paso grueso; accJ: suma de
+    // los saltos (Merton/Bates) o de los incrementos de Lévy (NIG) de los pasos
+    // finos. El paso grueso usa exactamente esas sumas: mismo ruido en ambos niveles.
+    float acc1 = 0.0f, acc2 = 0.0f, accJ = 0.0f;
     int coarse_k = 0;
 
     if (p < N_paths) {
@@ -478,6 +576,38 @@ __global__ void kernel_mlmc(
                 float dw2 = (c_p.L_hes[2] * z1 + c_p.L_hes[3] * z2) * sqrt_h_fine;
                 acc1 += dw1; acc2 += dw2;
                 d_euler_heston(Sf, Vf, dw1, dw2, h_fine);
+            } else if constexpr (MK == ModelKind::Merton) {
+                float z  = d_in[(k * 3 + 0) * N_paths + p];
+                float zn = d_in[(k * 3 + 1) * N_paths + p];
+                float zj = d_in[(k * 3 + 2) * N_paths + p];
+                float dw = z * sqrt_h_fine;
+                float J = salto_compuesto<float>(c_p.lam * h_fine, c_p.muJ, c_p.sigJ, zn, zj);
+                acc1 += dw; accJ += J;
+                Sf = d_paso_merton(Sf, dw, J, h_fine);
+            } else if constexpr (MK == ModelKind::Bates) {
+                float z1 = d_in[(k * 4 + 0) * N_paths + p];
+                float z2 = d_in[(k * 4 + 1) * N_paths + p];
+                float zn = d_in[(k * 4 + 2) * N_paths + p];
+                float zj = d_in[(k * 4 + 3) * N_paths + p];
+                float dw1 = z1 * sqrt_h_fine;
+                float dw2 = (c_p.L_hes[2] * z1 + c_p.L_hes[3] * z2) * sqrt_h_fine;
+                float J = salto_compuesto<float>(c_p.lam * h_fine, c_p.muJ, c_p.sigJ, zn, zj);
+                acc1 += dw1; acc2 += dw2; accJ += J;
+                d_paso_bates(Sf, Vf, dw1, dw2, J, h_fine);
+            } else if constexpr (MK == ModelKind::SABR) {
+                float z1 = d_in[(k * 2 + 0) * N_paths + p];
+                float z2 = d_in[(k * 2 + 1) * N_paths + p];
+                float dw1 = z1 * sqrt_h_fine;
+                float dw2 = (c_p.sabr_rho * z1 + c_p.sabr_rhoc * z2) * sqrt_h_fine;
+                acc1 += dw1; acc2 += dw2;
+                d_paso_sabr(Sf, Vf, dw1, dw2, k * h_fine, h_fine);
+            } else if constexpr (MK == ModelKind::NIG) {
+                float zw  = d_in[(k * 3 + 0) * N_paths + p];
+                float zig = d_in[(k * 3 + 1) * N_paths + p];
+                float zu  = d_in[(k * 3 + 2) * N_paths + p];
+                float dX = d_incremento_nig(zw, zig, zu, h_fine);
+                accJ += dX;
+                Sf = d_paso_nig(Sf, dX, h_fine);
             } else {
                 float dw = d_in[k * N_paths + p];
                 acc1 += dw;
@@ -485,9 +615,11 @@ __global__ void kernel_mlmc(
                     Sf = d_euler_gbm(Sf, dw, h_fine);
                 else if constexpr (MK == ModelKind::Dupire)
                     Sf = d_euler_dupire(Sf, dw, k * h_fine, h_fine);
-                if constexpr (d_is_path_dep<PK>())
-                    d_running_update<PK>(run_f, Sf);
             }
+            // (Antes solo se actualizaba en GBM/Dupire: con Heston los payoffs
+            // dependientes de la trayectoria se quedaban con el valor inicial.)
+            if constexpr (d_is_path_dep<PK>())
+                d_running_update<PK>(run_f, Sf);
 
             // Paso grueso (cada M pasos finos): usar h_coarse para el drift
             if ((k + 1) % M == 0) {
@@ -497,19 +629,24 @@ __global__ void kernel_mlmc(
                     Sc = Sc + c_p.mu * Sc * h_coarse + sqVcp * Sc * acc1;
                     float emc = expf(-c_p.kappa * h_coarse);
                     Vc = c_p.theta + emc * (Vc - c_p.theta) + c_p.xi * sqVcp * acc2;
-                    acc1 = acc2 = 0.0f;
-                } else {
-                    if constexpr (MK == ModelKind::GBM)
-                        Sc = Sc + c_p.mu * Sc * h_coarse + c_p.sigma * Sc * acc1;
-                    else if constexpr (MK == ModelKind::Dupire) {
-                        float sigma_loc = c_p.sigma0 * expf(-c_p.alpha * (coarse_k * h_coarse))
-                                        * powf(Sc / c_p.S0, c_p.beta_d - 1.0f);
-                        Sc = Sc + c_p.mu * Sc * h_coarse + sigma_loc * Sc * acc1;
-                    }
-                    if constexpr (d_is_path_dep<PK>())
-                        d_running_update<PK>(run_c, Sc);
-                    acc1 = 0.0f;
+                } else if constexpr (MK == ModelKind::Merton) {
+                    Sc = d_paso_merton(Sc, acc1, accJ, h_coarse);
+                } else if constexpr (MK == ModelKind::Bates) {
+                    d_paso_bates(Sc, Vc, acc1, acc2, accJ, h_coarse);
+                } else if constexpr (MK == ModelKind::SABR) {
+                    d_paso_sabr(Sc, Vc, acc1, acc2, coarse_k * h_coarse, h_coarse);
+                } else if constexpr (MK == ModelKind::NIG) {
+                    Sc = d_paso_nig(Sc, accJ, h_coarse);
+                } else if constexpr (MK == ModelKind::GBM) {
+                    Sc = Sc + c_p.mu * Sc * h_coarse + c_p.sigma * Sc * acc1;
+                } else if constexpr (MK == ModelKind::Dupire) {
+                    float sigma_loc = c_p.sigma0 * expf(-c_p.alpha * (coarse_k * h_coarse))
+                                    * powf(Sc / c_p.S0, c_p.beta_d - 1.0f);
+                    Sc = Sc + c_p.mu * Sc * h_coarse + sigma_loc * Sc * acc1;
                 }
+                acc1 = acc2 = accJ = 0.0f;
+                if constexpr (d_is_path_dep<PK>())
+                    d_running_update<PK>(run_c, Sc);
                 ++coarse_k;
             }
         }
@@ -1078,6 +1215,18 @@ static const McKernelFn MC_TABLE[N_MODELS][N_PAYOFFS] = {
     { McRow<ModelKind::MultiDupire>::fns[0], McRow<ModelKind::MultiDupire>::fns[1],
       McRow<ModelKind::MultiDupire>::fns[2], McRow<ModelKind::MultiDupire>::fns[3],
       McRow<ModelKind::MultiDupire>::fns[4], McRow<ModelKind::MultiDupire>::fns[5] },
+    { McRow<ModelKind::Merton>::fns[0],     McRow<ModelKind::Merton>::fns[1],
+      McRow<ModelKind::Merton>::fns[2],     McRow<ModelKind::Merton>::fns[3],
+      McRow<ModelKind::Merton>::fns[4],     McRow<ModelKind::Merton>::fns[5] },
+    { McRow<ModelKind::Bates>::fns[0],      McRow<ModelKind::Bates>::fns[1],
+      McRow<ModelKind::Bates>::fns[2],      McRow<ModelKind::Bates>::fns[3],
+      McRow<ModelKind::Bates>::fns[4],      McRow<ModelKind::Bates>::fns[5] },
+    { McRow<ModelKind::SABR>::fns[0],       McRow<ModelKind::SABR>::fns[1],
+      McRow<ModelKind::SABR>::fns[2],       McRow<ModelKind::SABR>::fns[3],
+      McRow<ModelKind::SABR>::fns[4],       McRow<ModelKind::SABR>::fns[5] },
+    { McRow<ModelKind::NIG>::fns[0],        McRow<ModelKind::NIG>::fns[1],
+      McRow<ModelKind::NIG>::fns[2],        McRow<ModelKind::NIG>::fns[3],
+      McRow<ModelKind::NIG>::fns[4],        McRow<ModelKind::NIG>::fns[5] },
 };
 
 static const MlmcKernelFn MLMC_TABLE[N_MODELS][N_PAYOFFS] = {
@@ -1093,6 +1242,18 @@ static const MlmcKernelFn MLMC_TABLE[N_MODELS][N_PAYOFFS] = {
     { MlmcRow<ModelKind::GBM>::fns[0],     MlmcRow<ModelKind::GBM>::fns[1],
       MlmcRow<ModelKind::GBM>::fns[2],     MlmcRow<ModelKind::GBM>::fns[3],
       MlmcRow<ModelKind::GBM>::fns[4],     MlmcRow<ModelKind::GBM>::fns[5] },
+    { MlmcRow<ModelKind::Merton>::fns[0],  MlmcRow<ModelKind::Merton>::fns[1],
+      MlmcRow<ModelKind::Merton>::fns[2],  MlmcRow<ModelKind::Merton>::fns[3],
+      MlmcRow<ModelKind::Merton>::fns[4],  MlmcRow<ModelKind::Merton>::fns[5] },
+    { MlmcRow<ModelKind::Bates>::fns[0],   MlmcRow<ModelKind::Bates>::fns[1],
+      MlmcRow<ModelKind::Bates>::fns[2],   MlmcRow<ModelKind::Bates>::fns[3],
+      MlmcRow<ModelKind::Bates>::fns[4],   MlmcRow<ModelKind::Bates>::fns[5] },
+    { MlmcRow<ModelKind::SABR>::fns[0],    MlmcRow<ModelKind::SABR>::fns[1],
+      MlmcRow<ModelKind::SABR>::fns[2],    MlmcRow<ModelKind::SABR>::fns[3],
+      MlmcRow<ModelKind::SABR>::fns[4],    MlmcRow<ModelKind::SABR>::fns[5] },
+    { MlmcRow<ModelKind::NIG>::fns[0],     MlmcRow<ModelKind::NIG>::fns[1],
+      MlmcRow<ModelKind::NIG>::fns[2],     MlmcRow<ModelKind::NIG>::fns[3],
+      MlmcRow<ModelKind::NIG>::fns[4],     MlmcRow<ModelKind::NIG>::fns[5] },
 };
 
 
@@ -1237,8 +1398,42 @@ static KernelParams make_params(const ModelVariant& model, const PayoffVariant& 
             p.sigma0 = (float)m.sigma0; p.alpha = (float)m.alpha; p.beta_d = (float)m.beta_d;
             p.n_assets = m.n;
         }
+        // Saltos lognormales (Merton, Bates): compensador λ·k̄, k̄ = e^{μ_J+σ_J²/2} - 1
+        [[maybe_unused]] auto saltos = [&](double lam, double muJ, double sigJ) {
+            p.lam = (float)lam; p.muJ = (float)muJ; p.sigJ = (float)sigJ;
+            p.compJ = (float)(lam * (std::exp(muJ + 0.5 * sigJ * sigJ) - 1.0));
+        };
+        if constexpr (std::is_same_v<T, MertonParams>) {
+            p.S0 = (float)m.S0; p.mu = (float)m.mu; p.sigma = (float)m.sigma;
+            saltos(m.lambda, m.muJ, m.sigmaJ);
+        }
+        if constexpr (std::is_same_v<T, BatesParams>) {
+            p.S0 = (float)m.S0; p.mu = (float)m.mu;
+            p.kappa = (float)m.kappa; p.theta = (float)m.theta;
+            p.xi = (float)m.xi; p.rho = (float)m.rho; p.v0 = (float)m.v0;
+            p.L_hes[0] = 1.0f; p.L_hes[1] = 0.0f;
+            p.L_hes[2] = (float)m.rho; p.L_hes[3] = (float)std::sqrt(std::max(0.0, 1.0 - m.rho * m.rho));
+            saltos(m.lambda, m.muJ, m.sigmaJ);
+        }
+        if constexpr (std::is_same_v<T, SABRParams>) {
+            p.S0 = (float)m.S0; p.mu = (float)m.mu;
+            p.v0 = (float)m.alpha; // la variable auxiliar V lleva α_t
+            p.sabr_bm1 = (float)(m.beta - 1.0); p.sabr_nu = (float)m.nu;
+            p.sabr_rho = (float)m.rho; p.sabr_rhoc = (float)std::sqrt(std::max(0.0, 1.0 - m.rho * m.rho));
+            p.vol_max = 3.0f;
+        }
+        if constexpr (std::is_same_v<T, NIGParams>) {
+            p.S0 = (float)m.S0; p.mu = (float)m.mu; p.sigma = (float)m.sigma;
+            p.nig_theta = (float)m.theta; p.nig_kappa = (float)m.kappa;
+            double arg = 1.0 - m.sigma * m.sigma * m.kappa - 2.0 * m.theta * m.kappa;
+            if (!(arg > 0.0))
+                throw std::runtime_error("NIGParams: hace falta 1 - sigma²·kappa - 2·theta·kappa > 0");
+            p.nig_omega = (float)(-(1.0 - std::sqrt(arg)) / m.kappa);
+        }
     }, model);
 
+    p.sqrt_h = std::sqrt(p.h);
+    p.inv_sqrt_h = 1.0f / p.sqrt_h;
     return p;
 }
 
@@ -1250,6 +1445,10 @@ static ModelKind model_kind(const ModelVariant& mv) {
         if constexpr (std::is_same_v<T, HestonParams>) return ModelKind::Heston;
         if constexpr (std::is_same_v<T, DupireLocalParams>) return ModelKind::Dupire;
         if constexpr (std::is_same_v<T, MultiDupireParams>) return ModelKind::MultiDupire;
+        if constexpr (std::is_same_v<T, MertonParams>) return ModelKind::Merton;
+        if constexpr (std::is_same_v<T, BatesParams>) return ModelKind::Bates;
+        if constexpr (std::is_same_v<T, SABRParams>) return ModelKind::SABR;
+        if constexpr (std::is_same_v<T, NIGParams>) return ModelKind::NIG;
         return ModelKind::GBM;
     }, mv);
 }
@@ -1572,8 +1771,9 @@ MCResult run_mlmc_cuda(const ModelVariant& model, const PayoffVariant& payoff,
             long long batch = std::min(batch_cap, n_paths - done);
             long long gen_count = (D * batch + 1) & ~1LL; // cuRAND exige count par
             CURAND_CHECK(curandGenerateNormal(j.gen, j.d_Z, gen_count, 0.0f, 1.0f));
-            // kernel_mlmc espera el incremento dW ya escalado, no Z.
-            if (mk != ModelKind::Heston) {
+            // kernel_mlmc espera el incremento dW ya escalado, no Z (salvo Heston y
+            // los modelos nuevos, que reciben Z y escalan dentro del kernel).
+            if (!ruido_sin_escalar(mk)) {
                 int blk_s = (int)((gen_count + BLOCK_SIZE - 1) / BLOCK_SIZE);
                 kernel_scale<<<blk_s, BLOCK_SIZE, 0, j.stream>>>(j.d_Z, sqrt_hf, gen_count);
             }
@@ -1694,6 +1894,13 @@ MCResult run_qmc_cuda(const ModelVariant& model, const PayoffVariant& payoff,
     int pidx = payoff_idx(payoff);
     bool is_multi = (mk == ModelKind::MultiDupire);
     int n_assets = is_multi ? std::get<MultiDupireParams>(model).n : 1;
+
+    // Brownian Bridge/PCA transforman un único browniano por paso: con varios
+    // factores de ruido (Heston, cestas, saltos, SABR, NIG) solo vale Raw (mismo
+    // criterio que run_mlqmc_cuda).
+    if (mode != NoiseMode::Raw && d_noise != 1)
+        throw std::runtime_error("run_qmc_cuda: Brownian Bridge/PCA solo soportados para modelos "
+            "de un factor de ruido por paso.");
 
     cublasHandle_t cublas = nullptr;
     if (mode == NoiseMode::PCA || is_multi) { CUBLAS_CHECK(cublasCreate(&cublas)); }
@@ -2070,12 +2277,13 @@ MCResult run_mlqmc_cuda(const ModelVariant& model, const PayoffVariant& payoff,
                 // Raw se escala aquí mismo (igual que run_mlmc_cuda); en BB/PCA la
                 // transformada ya devuelve el incremento real, sin escalado extra
                 // (igual que en run_qmc_cuda).
-                // Heston siempre recibe Z (escala internamente vía Cholesky,
-                // ver kernel_mlmc): escalar aquí también en modo Raw sería un doble
-                // escalado. BB/PCA ya están excluidos para Heston por el guard de
-                // model_noise_dim al principio de la función.
+                // Heston y los modelos nuevos (Merton, Bates, SABR, NIG) siempre
+                // reciben Z (escalan internamente, ver kernel_mlmc): escalar aquí
+                // también en modo Raw sería un doble escalado. BB/PCA ya están
+                // excluidos para ellos por el guard de model_noise_dim al
+                // principio de la función.
                 float* d_feed = j.d_Z;
-                if (mode == NoiseMode::Raw && mk != ModelKind::Heston) {
+                if (mode == NoiseMode::Raw && !ruido_sin_escalar(mk)) {
                     int blk_s = (int)((gen_count + BLOCK_SIZE - 1) / BLOCK_SIZE);
                     kernel_scale<<<blk_s, BLOCK_SIZE, 0, j.stream>>>(j.d_Z, sqrt_hf, gen_count);
                 } else if (mode == NoiseMode::BrownianBridge) {

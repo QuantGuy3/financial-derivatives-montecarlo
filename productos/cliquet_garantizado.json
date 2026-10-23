@@ -1,0 +1,24 @@
+{
+  "formato": "producto-estructurado/1",
+  "plantilla": "cliquet",
+  "nombre": "Cliquet anual 5 años con capital garantizado",
+  "descripcion": "Suma de las revalorizaciones anuales del índice, cada una limitada al intervalo [0%, 7%], con suelo global del 0%; se paga a vencimiento junto con el 100% del nominal. Modelo de Bates.",
+  "nominal": 1000,
+  "moneda": "EUR",
+  "vencimiento": "5A",
+  "mercado": {"tipo_interes": "2.8%"},
+  "subyacentes": [
+    {
+      "nombre": "SX5E",
+      "spot": 4950,
+      "dividendos": "3%",
+      "modelo": {"tipo": "bates", "vol_inicial": "17%", "kappa": 1.5, "vol_largo_plazo": "19%", "xi": 0.5, "rho": -0.7,
+                 "lambda": 0.3, "media_salto": -0.08, "vol_salto": 0.1}
+    }
+  ],
+  "observaciones": {"frecuencia": "anual"},
+  "amortizacion_final": [
+    {"tipo": "fijo", "importe": "100%"},
+    {"tipo": "cliquet", "suelo_local": "0%", "techo_local": "7%", "suelo_global": "0%"}
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "formato": "producto-estructurado/1",
+  "nombre": "Phoenix worst-of sobre 3 índices (emitido en 2025, valorado hoy)",
+  "descripcion": "Ejemplo de producto ya vivo descrito con fechas reales: los niveles iniciales son los de la emisión, hay un cupón impagado en memoria y las barreras de autocancelación están dadas fecha a fecha. Curva de tipos y correlaciones por parejas.",
+  "nominal": 50000,
+  "moneda": "EUR",
+  "fecha_valoracion": "2026-10-23",
+  "vencimiento": "2028-04-24",
+  "mercado": {"curva": [["6M", "2.2%"], ["1A", "2.3%"], ["2A", "2.5%"]]},
+  "subyacentes": [
+    {"nombre": "SX5E", "spot": 4950, "nivel_inicial": 5120, "dividendos": "3%",
+     "modelo": {"tipo": "heston", "vol_inicial": "18%", "kappa": 1.5, "vol_largo_plazo": "20%", "xi": 0.6, "rho": -0.7}},
+    {"nombre": "SPX", "spot": 5800, "nivel_inicial": 5400, "dividendos": "1.4%",
+     "modelo": {"tipo": "black_scholes", "volatilidad": "17%"}},
+    {"nombre": "NKY", "spot": 38500, "nivel_inicial": 39800, "dividendos": "1.8%",
+     "modelo": {"tipo": "black_scholes", "volatilidad": "21%"}}
+  ],
+  "correlacion": {"comun": "55%", "SX5E/SPX": "70%"},
+  "cesta": "peor",
+  "observaciones": {"fechas": ["2027-01-25", "2027-04-26", "2027-07-26", "2027-10-25", "2028-01-24", "2028-04-24"]},
+  "cupones": {"tipo": "condicional", "importe": "2.25%", "barrera": "65%", "memoria": true},
+  "autocancelacion": {"barrera": ["95%", "92.5%", "90%", "87.5%", "85%", "85%"]},
+  "barrera_capital": {"nivel": "55%", "observacion": "vencimiento"},
+  "amortizacion_final": [
+    {"tipo": "fijo", "importe": "100%"},
+    {"tipo": "put_vendida", "strike": "100%", "condicion": "barrera_tocada"}
+  ],
+  "estado": {"barrera_capital_tocada": false, "cupones_en_memoria": "2.25%"},
+  "simulacion": {"metodo": "auto", "error_objetivo": "0.05%", "semilla": 7}
+}

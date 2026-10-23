@@ -1,0 +1,15 @@
+{
+  "formato": "producto-estructurado/1",
+  "plantilla": "opcion",
+  "nombre": "Call europea at-the-money a 1 año",
+  "descripcion": "Opción call sobre una unidad del índice: el nominal es el spot, así que el precio sale en puntos de índice. Sirve para comprobar el motor frente a Black-Scholes.",
+  "nominal": 4950,
+  "moneda": "EUR",
+  "vencimiento": "1A",
+  "mercado": {"tipo_interes": "3%"},
+  "subyacentes": [
+    {"nombre": "SX5E", "spot": 4950, "dividendos": "3%", "modelo": {"tipo": "black_scholes", "volatilidad": "18%"}}
+  ],
+  "amortizacion_final": [{"tipo": "call", "strike": "100%"}],
+  "simulacion": {"metodo": "qmc", "error_objetivo": "0.01%"}
+}

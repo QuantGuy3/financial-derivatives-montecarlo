@@ -1,0 +1,21 @@
+{
+  "formato": "producto-estructurado/1",
+  "plantilla": "range_accrual",
+  "nombre": "Range accrual 2 años sobre EUR/USD, rango 95%-105%",
+  "descripcion": "Cupón trimestral de hasta el 7% anual, devengado por cada día en que el tipo de cambio está entre el 95% y el 105% de su nivel inicial. Capital garantizado. Modelo SABR (dividendo = tipo de interés extranjero).",
+  "nominal": 1000,
+  "moneda": "EUR",
+  "vencimiento": "2A",
+  "mercado": {"tipo_interes": "2.5%"},
+  "subyacentes": [
+    {
+      "nombre": "EURUSD",
+      "spot": 1.085,
+      "dividendos": "4%",
+      "modelo": {"tipo": "sabr", "alpha": "8%", "beta": 0.5, "nu": 0.45, "rho": -0.2}
+    }
+  ],
+  "observaciones": {"frecuencia": "trimestral"},
+  "cupones": {"tipo": "rango", "tasa_anual": "7%", "rango": ["95%", "105%"]},
+  "amortizacion_final": [{"tipo": "fijo", "importe": "100%"}]
+}

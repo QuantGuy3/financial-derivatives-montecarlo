@@ -1,0 +1,20 @@
+{
+  "formato": "producto-estructurado/1",
+  "plantilla": "twin_win",
+  "nombre": "Twin-win 3 años, barrera 60%",
+  "descripcion": "Si el índice no toca nunca el 60%, a vencimiento se cobra 100% + |P - 100%| (gana con subidas y con caídas moderadas). Si lo toca, replica al índice.",
+  "nominal": 1000,
+  "moneda": "EUR",
+  "vencimiento": "3A",
+  "mercado": {"tipo_interes": "3%"},
+  "subyacentes": [
+    {"nombre": "SX5E", "spot": 4950, "dividendos": "3%", "modelo": {"tipo": "black_scholes", "volatilidad": "18%"}}
+  ],
+  "barrera_capital": {"nivel": "60%", "observacion": "continua"},
+  "amortizacion_final": [
+    {"tipo": "fijo", "importe": "100%", "condicion": "barrera_no_tocada"},
+    {"tipo": "call", "strike": "100%", "participacion": "100%", "condicion": "barrera_no_tocada"},
+    {"tipo": "put", "strike": "100%", "participacion": "100%", "condicion": "barrera_no_tocada"},
+    {"tipo": "lineal", "condicion": "barrera_tocada"}
+  ]
+}

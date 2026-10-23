@@ -11,3 +11,7 @@ cmake .. \
     -DEigen3_DIR=/usr/share/eigen3/cmake
 make -j"$(nproc)"
 echo "Compilación completada."
+
+# Tests del módulo de productos estructurados (con GPU incluyen la comparación GPU/CPU)
+./test_estructurados rapido
+echo "Pruebe (desde build/):  ./estructurados plantillas  |  ./estructurados valorar ../productos/phoenix_worst_of.json"

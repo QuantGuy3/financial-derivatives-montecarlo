@@ -1,0 +1,26 @@
+{
+  "formato": "producto-estructurado/1",
+  "plantilla": "capital_protegido",
+  "nombre": "Nota garantizada 5 años con participación asiática",
+  "descripcion": "Devuelve el 100% del nominal a vencimiento más el 70% de la revalorización media anual del índice (media de las 5 observaciones anuales), con un tope del 160% en el rendimiento medio. Modelo de Heston.",
+  "nominal": 1000,
+  "moneda": "EUR",
+  "vencimiento": "5A",
+  "mercado": {"curva": [["1A", "2.6%"], ["2A", "2.7%"], ["5A", "2.9%"]]},
+  "subyacentes": [
+    {
+      "nombre": "SX5E",
+      "spot": 4950,
+      "dividendos": "3%",
+      "modelo": {"tipo": "heston", "vol_inicial": "17%", "kappa": 1.8, "vol_largo_plazo": "21%", "xi": 0.55, "rho": -0.75}
+    }
+  ],
+  "observaciones": {"frecuencia": "anual"},
+  "amortizacion_final": {
+    "rendimiento": "medio",
+    "componentes": [
+      {"tipo": "fijo", "importe": "100%"},
+      {"tipo": "call", "strike": "100%", "participacion": "70%", "techo": "160%"}
+    ]
+  }
+}

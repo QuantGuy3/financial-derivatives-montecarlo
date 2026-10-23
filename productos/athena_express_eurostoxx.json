@@ -1,0 +1,32 @@
+{
+  "formato": "producto-estructurado/1",
+  "plantilla": "athena",
+  "nombre": "Express (Athena) sobre Euro Stoxx 50, 4 años",
+  "descripcion": "Autocancelable semestral con barrera decreciente (100% bajando 5 puntos cada semestre desde el segundo); al autocancelar paga el nominal más un 4.5% por semestre transcurrido. Barrera de capital del 60% a vencimiento. Volatilidad local con skew.",
+  "nominal": 10000,
+  "moneda": "EUR",
+  "vencimiento": "4A",
+  "mercado": {"tipo_interes": "2.8%"},
+  "subyacentes": [
+    {
+      "nombre": "SX5E",
+      "spot": 4950,
+      "dividendos": "3.2%",
+      "modelo": {"tipo": "vol_local", "sigma0": "19%", "alpha": 0.15, "beta": 0.4}
+    }
+  ],
+  "observaciones": {"frecuencia": "semestral"},
+  "autocancelacion": {
+    "barrera": "100%",
+    "escalon": "-5%",
+    "desde": 2,
+    "prima": "4.5%",
+    "acumulativa": true
+  },
+  "barrera_capital": {"nivel": "60%", "observacion": "vencimiento"},
+  "amortizacion_final": [
+    {"tipo": "fijo", "importe": "100%"},
+    {"tipo": "put_vendida", "strike": "100%", "condicion": "barrera_tocada"}
+  ],
+  "simulacion": {"metodo": "auto", "error_objetivo": "0.05%"}
+}

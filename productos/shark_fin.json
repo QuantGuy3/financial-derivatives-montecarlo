@@ -1,0 +1,18 @@
+{
+  "formato": "producto-estructurado/1",
+  "plantilla": "shark_fin",
+  "nombre": "Shark fin 1 año: capital garantizado, 120% de participación hasta el 130%",
+  "descripcion": "Garantía del 100% y 120% de la subida del índice; si el índice toca el 130% en cualquier momento, la participación desaparece y se cobra el 105% a vencimiento.",
+  "nominal": 1000,
+  "moneda": "EUR",
+  "vencimiento": "1A",
+  "mercado": {"tipo_interes": "3%"},
+  "subyacentes": [
+    {"nombre": "SPX", "spot": 5800, "dividendos": "1.4%", "modelo": {"tipo": "black_scholes", "volatilidad": "16%"}}
+  ],
+  "barrera_desactivante": {"nivel": "130%", "observacion": "continua", "importe": "105%", "pago": "vencimiento"},
+  "amortizacion_final": [
+    {"tipo": "fijo", "importe": "100%"},
+    {"tipo": "call", "strike": "100%", "participacion": "120%"}
+  ]
+}
