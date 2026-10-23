@@ -2,7 +2,7 @@
 
 Cada producto se guarda en **un fichero JSON** que se lee como una ficha de producto (*term sheet*): datos generales, mercado, subyacentes, calendario, cupones, autocancelación, barreras y amortización final. El programa `estructurados` lo valida, lo muestra (`mostrar`) y lo valora (`valorar`). Los ficheros de `productos/` son ejemplos completos de cada familia.
 
-La forma más cómoda de crear uno es el asistente (`estructurados nuevo`) o una plantilla (`estructurados plantilla phoenix mi_producto.json`) que luego se edita con cualquier editor de texto. Este documento describe todas las claves por si se quiere escribir o retocar a mano.
+La forma más cómoda de crear uno es el diseñador visual (`herramientas/disenador_productos.html`, se abre en el navegador), el asistente de terminal (`estructurados nuevo`) o una plantilla (`estructurados plantilla phoenix mi_producto.json`) que luego se edita con cualquier editor de texto. Este documento describe todas las claves por si se quiere escribir o retocar a mano.
 
 ## Convenciones
 
@@ -16,6 +16,7 @@ La forma más cómoda de crear uno es el asistente (`estructurados nuevo`) o una
 - **P** es el *rendimiento de la cesta* en una fecha: cada subyacente aporta `P_i = S_i / nivel_inicial_i` y la cesta los combina (peor, mejor, media o media ponderada). Todas las barreras, *strikes* y rangos se expresan en ese mismo nivel relativo (100% = nivel inicial).
 - Los importes (cupones, primas, componentes de la amortización) están en **% del nominal**.
 - El lector admite comentarios `// ...` y `/* ... */` y comas finales, para que sea fácil anotar el fichero a mano (al guardar se escribe JSON estándar).
+- Las claves que empiezan por `_` se ignoran sin aviso (el diseñador visual guarda ahí el estado de su formulario, en `_disenador`).
 - Las claves desconocidas no son un error, pero se avisa de ellas sugiriendo la clave más parecida (`"obsrevacion"` → «¿quería decir "observacion"?»). Los errores indican la clave y la línea/columna del fichero.
 
 ## Esquema general

@@ -1,0 +1,1431 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Diseñador de estructurados</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+<style>
+/* Layout: mesa de estructuración — el formulario va por pasos a la izquierda y la
+   ficha del producto (estado, perfil de pago, calendario, JSON) se mantiene fija a
+   la derecha; en móvil la ficha queda debajo. */
+:root {
+  --papel: #f3f6f9;          /* fondo de la página */
+  --hoja: #ffffff;           /* paneles */
+  --campo: #fbfcfd;          /* fondo de los campos */
+  --tinta: #142033;          /* texto principal */
+  --tinta-2: #4b5a70;        /* texto secundario */
+  --regla: #d6dee8;          /* bordes y líneas */
+  --cuadricula: #e7ecf2;     /* papel milimetrado del gráfico */
+  --acento: #0a6a6a;         /* verde petróleo: acciones y escenario protegido */
+  --acento-suave: #e3f1f0;
+  --acento-tinta: #ffffff;
+  --tocada: #c24a12;         /* escenario con barrera tocada */
+  --ok: #1d7344;
+  --aviso: #8f5b00;
+  --error: #b42318;
+  --error-suave: #fdecea;
+  --fuente-titulo: "IBM Plex Sans Condensed", "Arial Narrow", "Roboto Condensed", system-ui, sans-serif;
+  --fuente-texto: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --fuente-datos: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --radio: 6px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --papel: #0e141d; --hoja: #151d29; --campo: #111824; --tinta: #e4eaf2; --tinta-2: #9aa7b9;
+    --regla: #283447; --cuadricula: #1d2735; --acento: #45b3aa; --acento-suave: #12302f; --acento-tinta: #062120;
+    --tocada: #f0875a; --ok: #53c28b; --aviso: #e2aa45; --error: #f2786d; --error-suave: #3a1916;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --papel: #0e141d; --hoja: #151d29; --campo: #111824; --tinta: #e4eaf2; --tinta-2: #9aa7b9;
+  --regla: #283447; --cuadricula: #1d2735; --acento: #45b3aa; --acento-suave: #12302f; --acento-tinta: #062120;
+  --tocada: #f0875a; --ok: #53c28b; --aviso: #e2aa45; --error: #f2786d; --error-suave: #3a1916;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body {
+  margin: 0;
+  background: var(--papel);
+  color: var(--tinta);
+  font: 15px/1.5 var(--fuente-texto);
+}
+.marco {
+  max-width: 1320px;
+  margin: 0 auto;
+  padding-block: 20px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+h1, h2, h3 { font-family: var(--fuente-titulo); text-wrap: balance; margin: 0; }
+h1 { font-size: 1.75rem; font-weight: 600; letter-spacing: 0.01em; }
+h2 { font-size: 1.15rem; font-weight: 600; }
+h3 { font-size: 0.95rem; font-weight: 600; }
+p { margin: 0; }
+a { color: var(--acento); }
+button, input, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--acento); outline-offset: 2px; }
+
+.cabecera { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 24px; margin-bottom: 20px; }
+.cabecera .lema { color: var(--tinta-2); max-width: 62ch; }
+.cabecera .acciones { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.mesa { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr); gap: 20px; align-items: start; }
+@media (max-width: 980px) { .mesa { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---------- Formulario ---------- */
+.formulario { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.paso { background: var(--hoja); border: 1px solid var(--regla); border-radius: var(--radio); padding: 18px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.paso > header { display: flex; align-items: baseline; gap: 10px; }
+.paso .num { font-family: var(--fuente-datos); font-size: 0.8rem; color: var(--acento); border: 1px solid var(--acento); border-radius: 999px; min-width: 1.6rem; height: 1.6rem; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.paso header p { color: var(--tinta-2); font-size: 0.88rem; }
+
+.rejilla { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px 14px; }
+.campo { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.campo label, .campo .etq { font-size: 0.8rem; font-weight: 500; color: var(--tinta-2); letter-spacing: 0.02em; }
+.campo.ancho { grid-column: 1 / -1; }
+.entrada { display: flex; align-items: stretch; border: 1px solid var(--regla); border-radius: var(--radio); background: var(--campo); }
+.entrada:focus-within { border-color: var(--acento); }
+.entrada input, .entrada select { border: 0; background: transparent; padding: 7px 9px; width: 100%; min-width: 0; outline: none; }
+.entrada .sufijo { padding: 7px 9px 7px 0; color: var(--tinta-2); font-family: var(--fuente-datos); font-size: 0.85rem; display: flex; align-items: center; }
+.entrada input { font-variant-numeric: tabular-nums; }
+.campo.mal .entrada { border-color: var(--error); background: var(--error-suave); }
+.campo .ayuda { font-size: 0.78rem; color: var(--tinta-2); }
+.campo .fallo { font-size: 0.78rem; color: var(--error); }
+textarea { border: 1px solid var(--regla); border-radius: var(--radio); background: var(--campo); padding: 7px 9px; resize: vertical; min-height: 3.2em; width: 100%; }
+.casilla { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; padding-top: 4px; }
+.casilla input { width: 1.05rem; height: 1.05rem; accent-color: var(--acento); }
+
+/* selector de plantillas */
+.plantillas { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+.plantilla { position: relative; display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid var(--regla); border-radius: var(--radio); background: var(--campo); cursor: pointer; }
+.plantilla input { position: absolute; opacity: 0; pointer-events: none; }
+.plantilla strong { font-family: var(--fuente-titulo); font-weight: 600; font-size: 0.98rem; }
+.plantilla span { font-size: 0.8rem; color: var(--tinta-2); }
+.plantilla:has(input:checked) { border-color: var(--acento); background: var(--acento-suave); box-shadow: inset 3px 0 0 var(--acento); }
+.plantilla:has(input:focus-visible) { outline: 2px solid var(--acento); outline-offset: 2px; }
+.descripcion-plantilla { font-size: 0.9rem; color: var(--tinta-2); max-width: 70ch; }
+
+/* subyacentes */
+.subyacente { border: 1px solid var(--regla); border-radius: var(--radio); padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+.subyacente > .titulo { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.subyacente .modelo-desc { font-size: 0.8rem; color: var(--tinta-2); }
+.lista { display: flex; flex-direction: column; gap: 10px; }
+.matriz { overflow-x: auto; }
+.matriz table { border-collapse: collapse; font-size: 0.85rem; }
+.matriz th, .matriz td { padding: 4px 6px; text-align: center; font-family: var(--fuente-datos); font-weight: 400; }
+.matriz th { color: var(--tinta-2); }
+.matriz input { width: 4.8rem; text-align: right; border: 1px solid var(--regla); border-radius: var(--radio); background: var(--campo); padding: 4px 6px; font-variant-numeric: tabular-nums; }
+.matriz td.diag { color: var(--tinta-2); }
+.segmentos { display: inline-flex; border: 1px solid var(--regla); border-radius: var(--radio); overflow: hidden; }
+.segmentos label { padding: 6px 12px; font-size: 0.85rem; cursor: pointer; border-right: 1px solid var(--regla); }
+.segmentos label:last-child { border-right: 0; }
+.segmentos input { position: absolute; opacity: 0; pointer-events: none; }
+.segmentos label:has(input:checked) { background: var(--acento); color: var(--acento-tinta); }
+.segmentos label:has(input:focus-visible) { outline: 2px solid var(--acento); outline-offset: -2px; }
+
+.bloque-pers { border: 1px dashed var(--regla); border-radius: var(--radio); padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.bloque-pers > .titulo { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+
+/* botones */
+.boton { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: var(--radio); border: 1px solid var(--acento); background: var(--acento); color: var(--acento-tinta); font-weight: 500; cursor: pointer; }
+.boton:hover { filter: brightness(1.08); }
+.boton.secundario { background: transparent; color: var(--acento); }
+.boton.pequeno { padding: 4px 10px; font-size: 0.82rem; }
+.boton.quitar { border-color: var(--regla); background: transparent; color: var(--tinta-2); }
+.boton.quitar:hover { color: var(--error); border-color: var(--error); }
+.boton:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* ---------- Ficha ---------- */
+.ficha { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 16px); display: flex; flex-direction: column; gap: 14px; min-width: 0; max-height: calc(100vh - 32px); overflow-y: auto; padding-right: 2px; }
+@media (max-width: 980px) { .ficha { position: static; max-height: none; overflow: visible; } }
+.panel { background: var(--hoja); border: 1px solid var(--regla); border-radius: var(--radio); padding: 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.estado { display: flex; align-items: flex-start; gap: 10px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 3px 10px; font-size: 0.8rem; font-weight: 600; white-space: nowrap; border: 1px solid currentColor; }
+.chip.ok { color: var(--ok); }
+.chip.mal { color: var(--error); }
+.estado ul { margin: 6px 0 0; padding-left: 18px; font-size: 0.85rem; color: var(--error); }
+.estado ul.avisos { color: var(--aviso); }
+.resumen { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 14px; font-size: 0.88rem; }
+.resumen dt { color: var(--tinta-2); }
+.resumen dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.etiqueta-mini { font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--tinta-2); font-weight: 600; }
+.leyenda { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 0.82rem; color: var(--tinta-2); }
+.leyenda i { display: inline-block; width: 18px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
+.grafico svg { width: 100%; height: auto; display: block; }
+.nota { font-size: 0.78rem; color: var(--tinta-2); }
+.tabla { overflow-x: auto; max-height: 300px; overflow-y: auto; border: 1px solid var(--regla); border-radius: var(--radio); }
+.tabla table { border-collapse: collapse; width: 100%; font-size: 0.82rem; }
+.tabla th { position: sticky; top: 0; background: var(--hoja); text-align: left; font-weight: 600; color: var(--tinta-2); padding: 6px 8px; border-bottom: 1px solid var(--regla); white-space: nowrap; }
+.tabla td { padding: 5px 8px; border-bottom: 1px solid var(--cuadricula); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tabla td.num { font-family: var(--fuente-datos); }
+.json-cab { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; }
+.json-cab .acciones { display: flex; flex-wrap: wrap; gap: 6px; }
+pre.json { margin: 0; max-height: 360px; overflow: auto; background: var(--campo); border: 1px solid var(--regla); border-radius: var(--radio); padding: 10px 12px; font: 0.78rem/1.5 var(--fuente-datos); white-space: pre; }
+.aviso-accion { font-size: 0.82rem; min-height: 1.2em; }
+.aviso-accion.ok { color: var(--ok); }
+.aviso-accion.mal { color: var(--error); }
+code { font-family: var(--fuente-datos); font-size: 0.88em; }
+@media (prefers-reduced-motion: no-preference) { .boton { transition: filter 0.15s; } }
+</style>
+</head>
+<body>
+<div class="marco">
+  <header class="cabecera">
+    <div>
+      <h1>Diseñador de productos estructurados</h1>
+      <p class="lema">Elija una plantilla, ajuste los datos y guarde el fichero JSON. Después, <code>estructurados valorar fichero.json</code> lo valora en GPU o CPU.</p>
+    </div>
+    <div class="acciones">
+      <label class="boton secundario" for="importar">Abrir JSON…</label>
+      <input id="importar" type="file" accept=".json,application/json" hidden>
+    </div>
+  </header>
+
+  <main class="mesa">
+    <form class="formulario" id="formulario" novalidate>
+      <section class="paso" aria-labelledby="t-paso1">
+        <header><span class="num">1</span><div><h2 id="t-paso1">Tipo de producto</h2></div></header>
+        <div class="plantillas" id="plantillas" role="radiogroup" aria-labelledby="t-paso1"></div>
+        <p class="descripcion-plantilla" id="descripcion-plantilla"></p>
+      </section>
+
+      <section class="paso" aria-labelledby="t-paso2">
+        <header><span class="num">2</span><div><h2 id="t-paso2">Datos generales</h2></div></header>
+        <div class="rejilla" id="general"></div>
+      </section>
+
+      <section class="paso" aria-labelledby="t-paso3">
+        <header><span class="num">3</span><div><h2 id="t-paso3">Subyacentes</h2><p>El rendimiento de cada uno es su precio dividido por el nivel inicial.</p></div></header>
+        <div class="lista" id="subyacentes"></div>
+        <div><button type="button" class="boton secundario pequeno" id="anadir-subyacente">Añadir subyacente</button></div>
+        <div id="correlacion" class="lista"></div>
+      </section>
+
+      <section class="paso" aria-labelledby="t-paso4">
+        <header><span class="num">4</span><div><h2 id="t-paso4">Características</h2><p id="t-paso4-sub">Niveles en % del nivel inicial; importes en % del nominal.</p></div></header>
+        <div id="caracteristicas" class="lista"></div>
+      </section>
+
+      <section class="paso" aria-labelledby="t-paso5">
+        <header><span class="num">5</span><div><h2 id="t-paso5">Simulación</h2></div></header>
+        <div class="rejilla" id="simulacion"></div>
+      </section>
+    </form>
+
+    <aside class="ficha" aria-label="Ficha del producto">
+      <section class="panel">
+        <div class="estado" id="estado"></div>
+        <dl class="resumen" id="resumen"></dl>
+      </section>
+      <section class="panel grafico">
+        <div class="json-cab"><h3>Perfil de pago a vencimiento</h3><span class="etiqueta-mini" id="eje-p">P final</span></div>
+        <div id="perfil"></div>
+        <div class="leyenda" id="leyenda"></div>
+        <p class="nota" id="nota-perfil"></p>
+      </section>
+      <section class="panel">
+        <h3>Calendario de observación</h3>
+        <div class="tabla" id="calendario"></div>
+      </section>
+      <section class="panel">
+        <div class="json-cab">
+          <h3>Fichero del producto</h3>
+          <div class="acciones">
+            <button type="button" class="boton pequeno" id="guardar">Guardar .json</button>
+            <button type="button" class="boton secundario pequeno" id="copiar">Copiar</button>
+          </div>
+        </div>
+        <p class="aviso-accion" id="aviso-accion" role="status"></p>
+        <pre class="json" id="json" tabindex="0" aria-label="Contenido JSON del producto"></pre>
+      </section>
+    </aside>
+  </main>
+</div>
+
+<script>
+(() => {
+'use strict';
+
+// ======================================================================
+// Utilidades
+// ======================================================================
+const $ = (s, r = document) => r.querySelector(s);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function num(x) {                       // número legible sin ceros sobrantes
+  if (!Number.isFinite(x)) return '';
+  const r = Math.round(x * 1e8) / 1e8;
+  return String(Object.is(r, -0) ? 0 : r);
+}
+const pct = x => num(x) + '%';         // 70 -> "70%"
+function leerNumero(txt) {             // admite coma decimal
+  const s = String(txt ?? '').trim().replace(/\s/g, '').replace(',', '.');
+  if (!/^[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/i.test(s)) return NaN;
+  return parseFloat(s);
+}
+function leerPlazo(txt) {               // "3A", "18M", "2A6M", "26S", "90D" o años
+  const s = String(txt ?? '').trim().toLowerCase().replace(',', '.');
+  if (!s) return NaN;
+  const n = leerNumero(s);
+  if (Number.isFinite(n)) return n;
+  const re = /(\d+(?:\.\d+)?)\s*([a-zñ]+)/g;
+  let total = 0, m, consumido = '';
+  while ((m = re.exec(s)) !== null) {
+    const v = parseFloat(m[1]), u = m[2][0];
+    if (u === 'a' || u === 'y') total += v;
+    else if (u === 'm') total += v / 12;
+    else if (u === 's' || u === 'w') total += v * 7 / 365;
+    else if (u === 'd') total += v / 365;
+    else return NaN;
+    consumido += m[0];
+  }
+  if (consumido.replace(/\s/g, '') !== s.replace(/\s/g, '')) return NaN;
+  return total > 0 ? total : NaN;
+}
+function etiquetaPlazo(t) {
+  const meses = t * 12, m = Math.round(meses);
+  if (Math.abs(meses - m) < 1e-6 && m > 0) {
+    const a = Math.floor(m / 12), r = m % 12;
+    return (a ? a + 'A' : '') + (r ? r + 'M' : '');
+  }
+  return 't=' + num(Math.round(t * 1e4) / 1e4);
+}
+const FRECUENCIAS = [['mensual', 12], ['bimestral', 6], ['trimestral', 4], ['cuatrimestral', 3], ['semestral', 2], ['anual', 1]];
+const frecuenciaPorAnio = f => (FRECUENCIAS.find(x => x[0] === f) || [null, 0])[1];
+const OBSERVACIONES = [
+  ['vencimiento', 'Solo a vencimiento'],
+  ['fechas', 'En cada fecha de observación'],
+  ['diaria', 'Diaria (cierres)'],
+  ['continua', 'Continua (americana)'],
+];
+function nombreFichero(nombre) {
+  const s = String(nombre || 'producto').normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60);
+  return (s || 'producto') + '.json';
+}
+
+// ======================================================================
+// Catálogo de modelos (mismo que `estructurados modelos`)
+// ======================================================================
+const MODELOS = [
+  { clave: 'black_scholes', nombre: 'Black-Scholes', desc: 'Volatilidad constante. Simulación exacta.',
+    params: [{ k: 'volatilidad', t: 'Volatilidad', pct: true, def: 20, min: 0, max: 500 }] },
+  { clave: 'heston', nombre: 'Heston', desc: 'Volatilidad estocástica con reversión a la media (sonrisa y skew).',
+    params: [
+      { k: 'vol_inicial', t: 'Volatilidad inicial √v0', pct: true, def: 20, min: 0, max: 500 },
+      { k: 'kappa', t: 'Reversión κ', def: 1.5, min: 0, max: 50, abierto: true },
+      { k: 'vol_largo_plazo', t: 'Volatilidad de largo plazo √θ', pct: true, def: 20, min: 0, max: 500, abierto: true },
+      { k: 'xi', t: 'Vol de la varianza ξ', def: 0.5, min: 0, max: 10, abierto: true },
+      { k: 'rho', t: 'Correlación precio-vol ρ', def: -0.7, min: -1, max: 1 }] },
+  { clave: 'merton', nombre: 'Merton', desc: 'Black-Scholes más saltos lognormales (caídas bruscas). Simulación exacta.',
+    params: [
+      { k: 'volatilidad', t: 'Volatilidad difusiva', pct: true, def: 15, min: 0, max: 500 },
+      { k: 'lambda', t: 'Saltos por año λ', def: 0.5, min: 0, max: 100 },
+      { k: 'media_salto', t: 'Media del log-salto', def: -0.1, min: -5, max: 5, ayuda: '-0.10 ≈ caída media del 9.5%' },
+      { k: 'vol_salto', t: 'Desv. típica del log-salto', def: 0.15, min: 0, max: 5 }] },
+  { clave: 'bates', nombre: 'Bates', desc: 'Heston más saltos de Merton.',
+    params: [
+      { k: 'vol_inicial', t: 'Volatilidad inicial √v0', pct: true, def: 20, min: 0, max: 500 },
+      { k: 'kappa', t: 'Reversión κ', def: 1.5, min: 0, max: 50, abierto: true },
+      { k: 'vol_largo_plazo', t: 'Volatilidad de largo plazo √θ', pct: true, def: 20, min: 0, max: 500, abierto: true },
+      { k: 'xi', t: 'Vol de la varianza ξ', def: 0.5, min: 0, max: 10, abierto: true },
+      { k: 'rho', t: 'Correlación precio-vol ρ', def: -0.7, min: -1, max: 1 },
+      { k: 'lambda', t: 'Saltos por año λ', def: 0.5, min: 0, max: 100 },
+      { k: 'media_salto', t: 'Media del log-salto', def: -0.1, min: -5, max: 5 },
+      { k: 'vol_salto', t: 'Desv. típica del log-salto', def: 0.15, min: 0, max: 5 }] },
+  { clave: 'vol_local', nombre: 'Volatilidad local', desc: 'σ(S,t) = σ0·e^(-αt)·(S/S0)^(β-1): β<1 da skew (tipo CEV).',
+    params: [
+      { k: 'sigma0', t: 'Volatilidad en el spot σ0', pct: true, def: 20, min: 0, max: 500, abierto: true },
+      { k: 'alpha', t: 'Decaimiento temporal α', def: 0, min: -10, max: 10 },
+      { k: 'beta', t: 'Elasticidad β', def: 0.7, min: -2, max: 3, ayuda: '1 = Black-Scholes' }] },
+  { clave: 'sabr', nombre: 'SABR', desc: 'Volatilidad estocástica con elasticidad β, sobre el forward.',
+    params: [
+      { k: 'alpha', t: 'Volatilidad inicial α', pct: true, def: 20, min: 0, max: 500, abierto: true },
+      { k: 'beta', t: 'Elasticidad β', def: 0.7, min: 0, max: 1 },
+      { k: 'nu', t: 'Vol de la vol ν', def: 0.4, min: 0, max: 10 },
+      { k: 'rho', t: 'Correlación precio-vol ρ', def: -0.5, min: -1, max: 1 }] },
+  { clave: 'nig', nombre: 'NIG', desc: 'Lévy de saltos puros: colas gruesas y asimetría. Simulación exacta.',
+    params: [
+      { k: 'sigma', t: 'Volatilidad σ', pct: true, def: 20, min: 0, max: 500, abierto: true },
+      { k: 'theta', t: 'Asimetría θ', def: -0.1, min: -5, max: 5, ayuda: 'negativa = skew bajista' },
+      { k: 'kappa', t: 'Curtosis κ', def: 0.2, min: 0, max: 20, abierto: true }] },
+];
+const modelo = clave => MODELOS.find(m => m.clave === clave) || MODELOS[0];
+function paramsPorDefecto(clave, vol) {
+  const p = {};
+  for (const d of modelo(clave).params) p[d.k] = (d.pct && vol != null && /vol|sigma|alpha/.test(d.k) && d.k !== 'vol_largo_plazo') ? vol : d.def;
+  return p;
+}
+
+// ======================================================================
+// Plantillas (mismas que `estructurados plantillas`)
+// ======================================================================
+const DOS = [{ nombre: 'SX5E', spot: 4800, div: 3, vol: 20 }, { nombre: 'SPX', spot: 5600, div: 1.5, vol: 18 }];
+const UNO = [{ nombre: 'SX5E', spot: 4800, div: 3, vol: 20 }];
+const capital = (imp = 100, cond) => cond ? { tipo: 'fijo', importe: pct(imp), condicion: cond } : { tipo: 'fijo', importe: pct(imp) };
+const perdida = (strike, conBarrera) => conBarrera
+  ? { tipo: 'put_vendida', strike: pct(strike), condicion: 'barrera_tocada' }
+  : { tipo: 'put_vendida', strike: pct(strike) };
+
+const PLANTILLAS = [
+  { id: 'phoenix', titulo: 'Autocallable Phoenix', sub: 'Cupón condicional con memoria', subs: DOS, venc: '3A',
+    desc: 'Paga un cupón en cada fecha si la cesta está por encima de la barrera de cupón; con memoria recupera los impagados. Se amortiza antes si supera la barrera de autocancelación. A vencimiento devuelve el nominal salvo que se haya tocado la barrera de capital.',
+    preguntas: [
+      { k: 'frecuencia', t: 'Frecuencia de observación', tipo: 'frec', def: 'trimestral' },
+      { k: 'cupon', t: 'Cupón por periodo', tipo: 'pct', def: 2, min: 0, max: 100, ayuda: '2% trimestral ≈ 8% anual' },
+      { k: 'barrera_cupon', t: 'Barrera de cupón', tipo: 'pct', def: 70, min: 0, max: 1000, abierto: true },
+      { k: 'memoria', t: 'Cupón con memoria', tipo: 'sino', def: true },
+      { k: 'barrera_autocall', t: 'Barrera de autocancelación', tipo: 'pct', def: 100, min: 0, max: 1000, abierto: true },
+      { k: 'escalon', t: 'Step-down por fecha', tipo: 'pct', def: 0, min: -100, max: 100, ayuda: '-5 = baja 5 puntos en cada fecha' },
+      { k: 'desde', t: 'Primera fecha autocancelable', tipo: 'entero', def: 2, min: 1 },
+      { k: 'barrera_capital', t: 'Barrera de capital', tipo: 'pct', def: 60, min: 0, max: 1000, abierto: true },
+      { k: 'obs_capital', t: 'Observación de la barrera de capital', tipo: 'obs', def: 'vencimiento' }],
+    construir: r => ({
+      observaciones: { frecuencia: r.frecuencia },
+      cupones: { tipo: 'condicional', importe: pct(r.cupon), barrera: pct(r.barrera_cupon), memoria: r.memoria },
+      autocancelacion: Object.assign({ barrera: pct(r.barrera_autocall) }, r.escalon ? { escalon: pct(r.escalon) } : {}, { desde: r.desde }),
+      barrera_capital: { nivel: pct(r.barrera_capital), observacion: r.obs_capital },
+      amortizacion_final: [capital(), perdida(100, true)] }),
+    describir: r => `Cupón condicional del ${pct(r.cupon)} ${r.frecuencia} (barrera ${pct(r.barrera_cupon)}, ${r.memoria ? 'con' : 'sin'} memoria); autocancelable si P ≥ ${pct(r.barrera_autocall)} desde la observación ${r.desde}; barrera de capital del ${pct(r.barrera_capital)} (${r.obs_capital}).` },
+  { id: 'athena', titulo: 'Athena / Express', sub: 'Prima acumulada al autocancelar', subs: DOS, venc: '3A',
+    desc: 'Sin cupones periódicos: si en una fecha la cesta supera la barrera de autocancelación, amortiza el nominal más una prima por cada periodo transcurrido. A vencimiento, como el Phoenix.',
+    preguntas: [
+      { k: 'frecuencia', t: 'Frecuencia de observación', tipo: 'frec', def: 'semestral' },
+      { k: 'prima', t: 'Prima por periodo transcurrido', tipo: 'pct', def: 4, min: 0, max: 100 },
+      { k: 'barrera_autocall', t: 'Barrera de autocancelación', tipo: 'pct', def: 100, min: 0, max: 1000, abierto: true },
+      { k: 'escalon', t: 'Step-down por fecha', tipo: 'pct', def: 0, min: -100, max: 100 },
+      { k: 'desde', t: 'Primera fecha autocancelable', tipo: 'entero', def: 1, min: 1 },
+      { k: 'barrera_capital', t: 'Barrera de capital', tipo: 'pct', def: 60, min: 0, max: 1000, abierto: true },
+      { k: 'obs_capital', t: 'Observación de la barrera de capital', tipo: 'obs', def: 'vencimiento' }],
+    construir: r => ({
+      observaciones: { frecuencia: r.frecuencia },
+      autocancelacion: Object.assign({ barrera: pct(r.barrera_autocall) }, r.escalon ? { escalon: pct(r.escalon) } : {},
+        { desde: r.desde, prima: pct(r.prima), acumulativa: true }),
+      barrera_capital: { nivel: pct(r.barrera_capital), observacion: r.obs_capital },
+      amortizacion_final: [capital(), perdida(100, true)] }),
+    describir: r => `Autocancelable ${r.frecuencia} si P ≥ ${pct(r.barrera_autocall)} pagando una prima acumulada del ${pct(r.prima)} por periodo; barrera de capital del ${pct(r.barrera_capital)} (${r.obs_capital}).` },
+  { id: 'reverse_convertible', titulo: 'Reverse convertible', sub: 'Cupón fijo, capital en riesgo', subs: UNO, venc: '1A',
+    desc: 'Cupón fijo pase lo que pase. A vencimiento devuelve el nominal si no se ha tocado la barrera (o si no hay barrera y P está sobre el strike); si no, se recibe P/strike del nominal.',
+    preguntas: [
+      { k: 'frecuencia', t: 'Frecuencia de pago del cupón', tipo: 'frec', def: 'anual' },
+      { k: 'tasa', t: 'Cupón fijo anual', tipo: 'pct', def: 8, min: 0, max: 100 },
+      { k: 'strike', t: 'Strike', tipo: 'pct', def: 100, min: 0, max: 1000, abierto: true },
+      { k: 'con_barrera', t: 'Con barrera de capital', tipo: 'sino', def: true },
+      { k: 'barrera', t: 'Barrera de capital', tipo: 'pct', def: 70, min: 0, max: 1000, abierto: true, si: r => r.con_barrera },
+      { k: 'obs', t: 'Observación de la barrera', tipo: 'obs', def: 'continua', si: r => r.con_barrera }],
+    construir: r => Object.assign(
+      { observaciones: { frecuencia: r.frecuencia }, cupones: { tipo: 'fijo', tasa_anual: pct(r.tasa) } },
+      r.con_barrera ? { barrera_capital: { nivel: pct(r.barrera), observacion: r.obs } } : {},
+      { amortizacion_final: [capital(), perdida(r.strike, r.con_barrera)] }),
+    describir: r => `Cupón fijo del ${pct(r.tasa)} anual pagadero de forma ${r.frecuencia}; ` + (r.con_barrera
+      ? `si se toca la barrera del ${pct(r.barrera)} (${r.obs}) se recibe P/strike del nominal (strike ${pct(r.strike)}).`
+      : `a vencimiento se recibe min(100%, P/strike) del nominal (strike ${pct(r.strike)}).`) },
+  { id: 'capital_protegido', titulo: 'Capital protegido', sub: 'Garantía + participación', subs: UNO, venc: '5A',
+    desc: 'Garantiza un porcentaje del nominal a vencimiento y añade una participación en la subida, con tope opcional; el rendimiento puede ser el final o la media de varias fechas.',
+    preguntas: [
+      { k: 'proteccion', t: 'Capital garantizado', tipo: 'pct', def: 100, min: 0, max: 1000 },
+      { k: 'participacion', t: 'Participación en la subida', tipo: 'pct', def: 80, min: -1000, max: 1000 },
+      { k: 'strike', t: 'Strike de la participación', tipo: 'pct', def: 100, min: 0, max: 1000 },
+      { k: 'techo', t: 'Tope del rendimiento P', tipo: 'pctopt', def: '', ayuda: 'vacío = sin tope' },
+      { k: 'rendimiento', t: 'Rendimiento final', tipo: 'opc', def: 'final', opciones: [['final', 'Fecha final'], ['medio', 'Media (asiático)']] },
+      { k: 'frecuencia', t: 'Frecuencia de la media', tipo: 'frec', def: 'anual', si: r => r.rendimiento === 'medio' }],
+    construir: r => {
+      const c = { tipo: 'call', strike: pct(r.strike), participacion: pct(r.participacion) };
+      if (r.techo !== '') c.techo = pct(r.techo);
+      const comp = [capital(r.proteccion), c];
+      return r.rendimiento === 'medio'
+        ? { observaciones: { frecuencia: r.frecuencia }, amortizacion_final: { rendimiento: 'medio', componentes: comp } }
+        : { amortizacion_final: comp }; },
+    describir: r => `Garantía del ${pct(r.proteccion)} del nominal más el ${pct(r.participacion)} de la subida por encima del ${pct(r.strike)}` +
+      (r.techo !== '' ? ` (rendimiento topado en ${pct(r.techo)})` : '') + (r.rendimiento === 'medio' ? `, sobre la media ${r.frecuencia} del subyacente.` : '.') },
+  { id: 'bonus', titulo: 'Certificado bonus', sub: 'Bonus con barrera y tope', subs: UNO, venc: '2A',
+    desc: 'Si el subyacente nunca toca la barrera se cobra al menos el bonus (y la subida hasta el tope); si la toca, replica al subyacente hasta el tope.',
+    preguntas: [
+      { k: 'bonus', t: 'Nivel de bonus', tipo: 'pct', def: 120, min: 0, max: 1000 },
+      { k: 'barrera', t: 'Barrera', tipo: 'pct', def: 70, min: 0, max: 1000, abierto: true },
+      { k: 'obs', t: 'Observación de la barrera', tipo: 'obs', def: 'continua' },
+      { k: 'tope', t: 'Tope del pago', tipo: 'pctopt', def: 150, ayuda: 'vacío = sin tope' }],
+    construir: r => {
+      const c = { tipo: 'call', strike: pct(r.bonus) }, l = { tipo: 'lineal' };
+      if (r.tope !== '') { c.techo = pct(r.tope); l.techo = pct(r.tope); }
+      c.condicion = 'barrera_no_tocada'; l.condicion = 'barrera_tocada';
+      return { barrera_capital: { nivel: pct(r.barrera), observacion: r.obs },
+               amortizacion_final: [capital(r.bonus, 'barrera_no_tocada'), c, l] }; },
+    describir: r => `Bonus del ${pct(r.bonus)} si no se toca la barrera del ${pct(r.barrera)} (${r.obs})` + (r.tope !== '' ? `, tope ${pct(r.tope)}.` : '.') },
+  { id: 'twin_win', titulo: 'Twin-win', sub: 'Gana con subidas y caídas moderadas', subs: UNO, venc: '3A',
+    desc: 'Si no se toca la barrera, a vencimiento se cobra 100% + participación × |P − 100%|; si se toca, replica al subyacente.',
+    preguntas: [
+      { k: 'alcista', t: 'Participación en la subida', tipo: 'pct', def: 100, min: -1000, max: 1000 },
+      { k: 'bajista', t: 'Participación en la caída', tipo: 'pct', def: 100, min: -1000, max: 1000 },
+      { k: 'barrera', t: 'Barrera', tipo: 'pct', def: 60, min: 0, max: 1000, abierto: true },
+      { k: 'obs', t: 'Observación de la barrera', tipo: 'obs', def: 'continua' },
+      { k: 'tope', t: 'Tope del rendimiento P', tipo: 'pctopt', def: '', ayuda: 'vacío = sin tope' }],
+    construir: r => {
+      const c = { tipo: 'call', participacion: pct(r.alcista) }, l = { tipo: 'lineal' };
+      if (r.tope !== '') { c.techo = pct(r.tope); l.techo = pct(r.tope); }
+      c.condicion = 'barrera_no_tocada'; l.condicion = 'barrera_tocada';
+      return { barrera_capital: { nivel: pct(r.barrera), observacion: r.obs },
+               amortizacion_final: [capital(100, 'barrera_no_tocada'), c,
+                 { tipo: 'put', participacion: pct(r.bajista), condicion: 'barrera_no_tocada' }, l] }; },
+    describir: r => `Twin-win: ${pct(r.alcista)} de la subida y ${pct(r.bajista)} de la caída si no se toca la barrera del ${pct(r.barrera)} (${r.obs}).` },
+  { id: 'shark_fin', titulo: 'Shark fin', sub: 'Capital protegido con desactivante', subs: UNO, venc: '1A',
+    desc: 'Garantiza el capital y participa en la subida, pero si el subyacente toca la barrera superior la participación desaparece y se cobra un reembolso fijo.',
+    preguntas: [
+      { k: 'proteccion', t: 'Capital garantizado', tipo: 'pct', def: 100, min: 0, max: 1000 },
+      { k: 'participacion', t: 'Participación en la subida', tipo: 'pct', def: 100, min: -1000, max: 1000 },
+      { k: 'barrera_ko', t: 'Barrera desactivante', tipo: 'pct', def: 130, min: 0, max: 10000, abierto: true },
+      { k: 'obs', t: 'Observación de la desactivante', tipo: 'obs', def: 'continua', sinVencimiento: true },
+      { k: 'reembolso', t: 'Reembolso si se desactiva', tipo: 'pct', def: 105, min: 0, max: 10000 }],
+    construir: r => ({
+      barrera_desactivante: { nivel: pct(r.barrera_ko), observacion: r.obs, importe: pct(r.reembolso), pago: 'vencimiento' },
+      amortizacion_final: [capital(r.proteccion), { tipo: 'call', participacion: pct(r.participacion) }] }),
+    describir: r => `Garantía del ${pct(r.proteccion)} más el ${pct(r.participacion)} de la subida; si se toca el ${pct(r.barrera_ko)} (${r.obs}) se cobra el ${pct(r.reembolso)} a vencimiento.` },
+  { id: 'range_accrual', titulo: 'Range accrual', sub: 'Cupón por días dentro de un rango', subs: UNO, venc: '2A',
+    desc: 'El cupón de cada periodo se devenga en proporción a los días en que el subyacente cotiza dentro del rango. Capital protegido a vencimiento.',
+    preguntas: [
+      { k: 'frecuencia', t: 'Frecuencia de pago', tipo: 'frec', def: 'trimestral' },
+      { k: 'tasa', t: 'Cupón anual máximo', tipo: 'pct', def: 6, min: 0, max: 100 },
+      { k: 'inferior', t: 'Límite inferior del rango', tipo: 'pct', def: 90, min: 0, max: 1000 },
+      { k: 'superior', t: 'Límite superior del rango', tipo: 'pct', def: 110, min: 0, max: 1000 },
+      { k: 'proteccion', t: 'Capital garantizado', tipo: 'pct', def: 100, min: 0, max: 1000 }],
+    construir: r => ({
+      observaciones: { frecuencia: r.frecuencia },
+      cupones: { tipo: 'rango', tasa_anual: pct(r.tasa), rango: [pct(r.inferior), pct(r.superior)] },
+      amortizacion_final: [capital(r.proteccion)] }),
+    describir: r => `Cupón de hasta el ${pct(r.tasa)} anual (${r.frecuencia}) devengado por cada día con P en [${pct(r.inferior)}, ${pct(r.superior)}]; capital garantizado del ${pct(r.proteccion)}.` },
+  { id: 'cliquet', titulo: 'Cliquet garantizado', sub: 'Suma de rendimientos acotados', subs: UNO, venc: '5A',
+    desc: 'Acumula los rendimientos de cada periodo, cada uno acotado entre un suelo y un techo locales; a vencimiento paga el capital garantizado más la suma con un suelo global.',
+    preguntas: [
+      { k: 'frecuencia', t: 'Frecuencia de los periodos', tipo: 'frec', def: 'anual' },
+      { k: 'techo_local', t: 'Techo de cada rendimiento', tipo: 'pct', def: 8, min: -1000, max: 1000 },
+      { k: 'suelo_local', t: 'Suelo de cada rendimiento', tipo: 'pct', def: 0, min: -1000, max: 1000 },
+      { k: 'suelo_global', t: 'Suelo de la suma', tipo: 'pct', def: 0, min: -1000, max: 1000 },
+      { k: 'techo_global', t: 'Techo de la suma', tipo: 'pctopt', def: '', ayuda: 'vacío = sin techo' },
+      { k: 'participacion', t: 'Participación sobre la suma', tipo: 'pct', def: 100, min: -1000, max: 1000 },
+      { k: 'proteccion', t: 'Capital garantizado', tipo: 'pct', def: 100, min: 0, max: 1000 }],
+    construir: r => {
+      const c = { tipo: 'cliquet', participacion: pct(r.participacion), suelo_local: pct(r.suelo_local),
+                  techo_local: pct(r.techo_local), suelo_global: pct(r.suelo_global) };
+      if (r.techo_global !== '') c.techo_global = pct(r.techo_global);
+      return { observaciones: { frecuencia: r.frecuencia }, amortizacion_final: [capital(r.proteccion), c] }; },
+    describir: r => `Cliquet ${r.frecuencia} con rendimientos acotados a [${pct(r.suelo_local)}, ${pct(r.techo_local)}], suelo global ${pct(r.suelo_global)}; capital garantizado del ${pct(r.proteccion)}.` },
+  { id: 'opcion', titulo: 'Opción europea', sub: 'Call, put o digital', subs: UNO, venc: '1A', nominalEsSpot: true,
+    desc: 'Opción europea sobre un subyacente. El nominal se iguala al spot, de modo que el precio es el de una opción sobre una unidad.',
+    preguntas: [
+      { k: 'tipo_opcion', t: 'Tipo de opción', tipo: 'opc', def: 'call', opciones: [['call', 'Call'], ['put', 'Put'], ['digital_call', 'Digital call'], ['digital_put', 'Digital put']] },
+      { k: 'strike', t: 'Strike', tipo: 'pct', def: 100, min: 0, max: 10000 },
+      { k: 'importe', t: 'Pago de la digital', tipo: 'pct', def: 100, min: 0, max: 10000, si: r => r.tipo_opcion.startsWith('digital') }],
+    construir: r => {
+      const t = r.tipo_opcion, b = { tipo: t === 'digital_call' ? 'digital' : t, strike: pct(r.strike) };
+      if (t.startsWith('digital')) b.importe = pct(r.importe);
+      return { amortizacion_final: [b] }; },
+    describir: r => `Opción ${r.tipo_opcion} europea con strike ${pct(r.strike)}.` },
+  { id: 'personalizado', titulo: 'Personalizado', sub: 'Construir pieza a pieza', subs: DOS, venc: '3A',
+    desc: 'Combine libremente calendario, patas de cupón, autocancelación, barreras y los componentes del pago final.',
+    preguntas: [], construir: null, describir: null },
+];
+const plantilla = id => PLANTILLAS.find(p => p.id === id) || PLANTILLAS[0];
+
+// Componentes del pago final para el modo personalizado
+const TIPOS_BLOQUE = [
+  ['fijo', 'Importe fijo', ['importe']],
+  ['put_vendida', 'Pérdida bajo el strike (put vendida)', ['strike', 'participacion']],
+  ['call', 'Participación en la subida (call)', ['strike', 'participacion', 'techo']],
+  ['put', 'Participación en la caída (put)', ['strike', 'participacion', 'suelo']],
+  ['lineal', 'Réplica del subyacente (lineal)', ['participacion', 'suelo', 'techo']],
+  ['digital', 'Digital: paga si P ≥ strike', ['strike', 'importe']],
+  ['digital_put', 'Digital: paga si P < strike', ['strike', 'importe']],
+  ['cliquet', 'Cliquet', ['participacion', 'suelo_local', 'techo_local', 'suelo_global', 'techo_global']],
+];
+const CAMPO_BLOQUE = {
+  importe: ['Importe', 100], strike: ['Strike', 100], participacion: ['Participación', 100],
+  techo: ['Techo de P (vacío = sin)', ''], suelo: ['Suelo de P (vacío = sin)', ''],
+  suelo_local: ['Suelo local', 0], techo_local: ['Techo local', 8], suelo_global: ['Suelo global', 0],
+  techo_global: ['Techo global (vacío = sin)', ''] };
+const OPCIONALES = new Set(['techo', 'suelo', 'techo_global']);
+
+// ======================================================================
+// Estado
+// ======================================================================
+function subyacentesDe(p) {
+  return p.subs.map(s => ({ nombre: s.nombre, spot: s.spot, nivel_inicial: '', dividendos: s.div,
+                            modelo: 'black_scholes', params: paramsPorDefecto('black_scholes', s.vol) }));
+}
+function respuestasDe(p) {
+  const r = {};
+  for (const q of p.preguntas) r[q.k] = q.def;
+  return r;
+}
+function personalizadoInicial() {
+  return {
+    frecuencia: 'trimestral',
+    cupones: [{ tipo: 'condicional', importe: 2, tasa: 5, barrera: 70, memoria: true, inf: 90, sup: 110 }],
+    autocall: { activa: true, barrera: 100, escalon: 0, desde: 2, prima: 0, acumulativa: false },
+    ki: { activa: true, nivel: 60, observacion: 'vencimiento' },
+    ko: { activa: false, nivel: 130, observacion: 'continua', importe: 100, pago: 'vencimiento' },
+    rendimiento: 'final',
+    bloques: [{ tipo: 'fijo', importe: 100, condicion: 'siempre' },
+              { tipo: 'put_vendida', strike: 100, participacion: 100, condicion: 'barrera_tocada' }],
+  };
+}
+function estadoInicial(id) {
+  const p = plantilla(id);
+  return {
+    plantilla: p.id,
+    general: { nombre: p.titulo, descripcion: '', nominal: 1000, moneda: 'EUR', vencimiento: p.venc, tipo_interes: 3 },
+    subyacentes: subyacentesDe(p),
+    subyacentesTocados: false,
+    correlacion: { modo: 'comun', comun: 60, parejas: {} },
+    cesta: 'peor',
+    resp: respuestasDe(p),
+    pers: personalizadoInicial(),
+    simulacion: { metodo: 'auto', error: 0.05 },
+  };
+}
+let estado = estadoInicial('phoenix');
+let errores = new Map();   // ruta del campo -> mensaje
+
+// ======================================================================
+// Construcción de controles
+// ======================================================================
+// Cada control lleva data-ruta (dónde se guarda en `estado`) y data-tipo
+// (cómo se interpreta). Los valores se guardan como texto mientras se
+// escriben y se interpretan al generar el JSON y al validar.
+function campo({ ruta, etiqueta, tipo = 'txt', valor, sufijo, ayuda, opciones, ancho, deshabilitado, estructural }) {
+  const id = 'c-' + ruta.replace(/[^a-zA-Z0-9]+/g, '-');
+  const attrs = `id="${id}" data-ruta="${esc(ruta)}" data-tipo="${tipo}"${estructural ? ' data-estructural="1"' : ''}${deshabilitado ? ' disabled' : ''}`;
+  let control;
+  if (tipo === 'sel') {
+    control = `<div class="entrada"><select ${attrs}>` +
+      opciones.map(([v, t]) => `<option value="${esc(v)}"${String(v) === String(valor) ? ' selected' : ''}>${esc(t)}</option>`).join('') +
+      `</select></div>`;
+  } else if (tipo === 'bool') {
+    return `<div class="campo${ancho ? ' ancho' : ''}" data-campo="${esc(ruta)}"><span class="etq">&nbsp;</span>` +
+      `<label class="casilla"><input type="checkbox" ${attrs}${valor ? ' checked' : ''}> ${esc(etiqueta)}</label>` +
+      (ayuda ? `<span class="ayuda">${esc(ayuda)}</span>` : '') + `<span class="fallo" data-fallo="${esc(ruta)}"></span></div>`;
+  } else {
+    const modo = (tipo === 'num' || tipo === 'pct' || tipo === 'pctopt' || tipo === 'ent') ? ' inputmode="decimal"' : '';
+    control = `<div class="entrada"><input type="text" autocomplete="off" spellcheck="false"${modo} ${attrs} value="${esc(valor ?? '')}">` +
+      (sufijo ? `<span class="sufijo">${esc(sufijo)}</span>` : '') + `</div>`;
+  }
+  return `<div class="campo${ancho ? ' ancho' : ''}" data-campo="${esc(ruta)}"><label for="${id}">${esc(etiqueta)}</label>${control}` +
+    (ayuda ? `<span class="ayuda">${esc(ayuda)}</span>` : '') + `<span class="fallo" data-fallo="${esc(ruta)}"></span></div>`;
+}
+
+function renderPlantillas() {
+  $('#plantillas').innerHTML = PLANTILLAS.map(p =>
+    `<label class="plantilla"><input type="radio" name="plantilla" value="${p.id}" id="plantilla-${p.id}"${p.id === estado.plantilla ? ' checked' : ''}>` +
+    `<strong>${esc(p.titulo)}</strong><span>${esc(p.sub)}</span></label>`).join('');
+  $('#descripcion-plantilla').textContent = plantilla(estado.plantilla).desc;
+}
+
+function renderGeneral() {
+  const g = estado.general, p = plantilla(estado.plantilla);
+  $('#general').innerHTML = [
+    campo({ ruta: 'general.nombre', etiqueta: 'Nombre del producto', valor: g.nombre, ancho: true }),
+    campo({ ruta: 'general.nominal', etiqueta: p.nominalEsSpot ? 'Nominal (= spot)' : 'Nominal', tipo: 'num', valor: g.nominal,
+            deshabilitado: p.nominalEsSpot }),
+    campo({ ruta: 'general.moneda', etiqueta: 'Moneda', valor: g.moneda }),
+    campo({ ruta: 'general.vencimiento', etiqueta: 'Vencimiento', valor: g.vencimiento, ayuda: '3A, 18M, 2A6M o años' }),
+    campo({ ruta: 'general.tipo_interes', etiqueta: 'Tipo de interés (continuo)', tipo: 'pct', valor: g.tipo_interes, sufijo: '%' }),
+    campo({ ruta: 'general.descripcion', etiqueta: 'Descripción (vacía = se genera sola)', valor: g.descripcion, ancho: true }),
+  ].join('');
+}
+
+function renderSubyacentes() {
+  const n = estado.subyacentes.length, p = plantilla(estado.plantilla);
+  $('#subyacentes').innerHTML = estado.subyacentes.map((s, i) => {
+    const m = modelo(s.modelo);
+    const params = m.params.map(d => campo({ ruta: `subyacentes.${i}.params.${d.k}`, etiqueta: d.t, tipo: d.pct ? 'pct' : 'num',
+      valor: s.params[d.k], sufijo: d.pct ? '%' : '', ayuda: d.ayuda })).join('');
+    return `<div class="subyacente"><div class="titulo"><h3>Subyacente ${i + 1}</h3>` +
+      (n > 1 ? `<button type="button" class="boton quitar pequeno" data-quitar-subyacente="${i}">Quitar</button>` : '') + `</div>` +
+      `<div class="rejilla">` +
+      campo({ ruta: `subyacentes.${i}.nombre`, etiqueta: 'Nombre', valor: s.nombre }) +
+      campo({ ruta: `subyacentes.${i}.spot`, etiqueta: 'Precio actual (spot)', tipo: 'num', valor: s.spot }) +
+      campo({ ruta: `subyacentes.${i}.nivel_inicial`, etiqueta: 'Nivel inicial', tipo: 'numopt', valor: s.nivel_inicial, ayuda: 'vacío = spot' }) +
+      campo({ ruta: `subyacentes.${i}.dividendos`, etiqueta: 'Dividendo', tipo: 'pct', valor: s.dividendos, sufijo: '%' }) +
+      campo({ ruta: `subyacentes.${i}.modelo`, etiqueta: 'Modelo', tipo: 'sel', valor: s.modelo, estructural: true,
+              opciones: MODELOS.map(x => [x.clave, x.nombre]) }) +
+      `</div><p class="modelo-desc">${esc(m.desc)}</p><div class="rejilla">${params}</div></div>`;
+  }).join('');
+  const btn = $('#anadir-subyacente');
+  btn.hidden = !!p.nominalEsSpot;
+  btn.disabled = n >= 16;
+  renderCorrelacion();
+}
+
+function renderCorrelacion() {
+  const subs = estado.subyacentes, n = subs.length, c = estado.correlacion;
+  if (n < 2) { $('#correlacion').innerHTML = ''; return; }
+  let html = `<div class="rejilla">` +
+    campo({ ruta: 'cesta', etiqueta: 'Cesta: cómo se combinan los rendimientos', tipo: 'sel', valor: estado.cesta,
+            opciones: [['peor', 'El peor (worst-of)'], ['mejor', 'El mejor (best-of)'], ['media', 'Media equiponderada']] }) +
+    `<div class="campo"><span class="etq">Correlación</span><div class="segmentos" role="radiogroup" aria-label="Correlación">` +
+    `<label><input type="radio" name="modo-corr" value="comun" id="corr-comun"${c.modo === 'comun' ? ' checked' : ''}>Misma para todos</label>` +
+    `<label><input type="radio" name="modo-corr" value="parejas" id="corr-parejas"${c.modo === 'parejas' ? ' checked' : ''}>Por parejas</label>` +
+    `</div></div>`;
+  if (c.modo === 'comun')
+    html += campo({ ruta: 'correlacion.comun', etiqueta: 'Correlación entre subyacentes', tipo: 'pct', valor: c.comun, sufijo: '%' });
+  html += `</div>`;
+  if (c.modo === 'parejas') {
+    html += `<div class="matriz"><table><thead><tr><th></th>` + subs.map(s => `<th>${esc(s.nombre)}</th>`).join('') + `</tr></thead><tbody>`;
+    for (let i = 0; i < n; i++) {
+      html += `<tr><th>${esc(subs[i].nombre)}</th>`;
+      for (let j = 0; j < n; j++) {
+        if (i === j) html += `<td class="diag">100%</td>`;
+        else if (j < i) html += `<td class="diag" id="espejo-${j}-${i}">${esc(String(valorPareja(j, i)))}%</td>`;
+        else html += `<td><input type="text" inputmode="decimal" id="c-par-${i}-${j}" aria-label="Correlación ${esc(subs[i].nombre)} con ${esc(subs[j].nombre)} en %" data-ruta="correlacion.parejas.${i}-${j}" data-tipo="pct" value="${esc(valorPareja(i, j))}"></td>`;
+      }
+      html += `</tr>`;
+    }
+    html += `</tbody></table></div><span class="fallo" data-fallo="correlacion.matriz"></span>`;
+  } else {
+    html += `<span class="fallo" data-fallo="correlacion.matriz"></span>`;
+  }
+  $('#correlacion').innerHTML = html;
+}
+function valorPareja(i, j) {
+  const k = `${i}-${j}`, c = estado.correlacion;
+  return (k in c.parejas) ? c.parejas[k] : c.comun;
+}
+
+function renderCaracteristicas() {
+  const p = plantilla(estado.plantilla);
+  if (p.id === 'personalizado') { renderPersonalizado(); return; }
+  const r = interpretarRespuestas(p);
+  const html = p.preguntas.filter(q => !q.si || q.si(r)).map(q => {
+    const ruta = 'resp.' + q.k, v = estado.resp[q.k];
+    switch (q.tipo) {
+      case 'frec': return campo({ ruta, etiqueta: q.t, tipo: 'sel', valor: v, opciones: FRECUENCIAS.map(([f]) => [f, f[0].toUpperCase() + f.slice(1)]), ayuda: q.ayuda });
+      case 'obs': return campo({ ruta, etiqueta: q.t, tipo: 'sel', valor: v, opciones: q.sinVencimiento ? OBSERVACIONES.slice(1) : OBSERVACIONES, ayuda: q.ayuda });
+      case 'opc': return campo({ ruta, etiqueta: q.t, tipo: 'sel', valor: v, opciones: q.opciones, ayuda: q.ayuda, estructural: true });
+      case 'sino': return campo({ ruta, etiqueta: q.t, tipo: 'bool', valor: v, ayuda: q.ayuda, estructural: true });
+      case 'entero': return campo({ ruta, etiqueta: q.t, tipo: 'ent', valor: v, ayuda: q.ayuda });
+      default: return campo({ ruta, etiqueta: q.t, tipo: q.tipo === 'pctopt' ? 'pctopt' : 'pct', valor: v, sufijo: '%', ayuda: q.ayuda });
+    }
+  }).join('');
+  $('#caracteristicas').innerHTML = `<div class="rejilla">${html}</div>`;
+}
+
+function renderPersonalizado() {
+  const s = estado.pers;
+  let h = `<div class="rejilla">` +
+    campo({ ruta: 'pers.frecuencia', etiqueta: 'Frecuencia de observación', tipo: 'sel', valor: s.frecuencia, opciones: FRECUENCIAS.map(([f]) => [f, f[0].toUpperCase() + f.slice(1)]) }) +
+    campo({ ruta: 'pers.rendimiento', etiqueta: 'Rendimiento final', tipo: 'sel', valor: s.rendimiento, opciones: [['final', 'Fecha final'], ['medio', 'Media de las fechas']] }) +
+    `</div>`;
+  // Cupones
+  h += `<div class="bloque-pers"><div class="titulo"><h3>Cupones</h3><button type="button" class="boton secundario pequeno" data-accion="anadir-cupon"${s.cupones.length >= 4 ? ' disabled' : ''}>Añadir pata</button></div>`;
+  if (!s.cupones.length) h += `<p class="nota">Sin cupones.</p>`;
+  s.cupones.forEach((c, i) => {
+    h += `<div class="subyacente"><div class="titulo"><h3>Pata ${i + 1}</h3><button type="button" class="boton quitar pequeno" data-accion="quitar-cupon" data-i="${i}">Quitar</button></div><div class="rejilla">` +
+      campo({ ruta: `pers.cupones.${i}.tipo`, etiqueta: 'Tipo', tipo: 'sel', valor: c.tipo, estructural: true,
+              opciones: [['condicional', 'Condicional (barrera)'], ['fijo', 'Fijo'], ['rango', 'Range accrual']] }) +
+      (c.tipo === 'condicional'
+        ? campo({ ruta: `pers.cupones.${i}.importe`, etiqueta: 'Cupón por periodo', tipo: 'pct', valor: c.importe, sufijo: '%' }) +
+          campo({ ruta: `pers.cupones.${i}.barrera`, etiqueta: 'Barrera de cupón', tipo: 'pct', valor: c.barrera, sufijo: '%' }) +
+          campo({ ruta: `pers.cupones.${i}.memoria`, etiqueta: 'Con memoria', tipo: 'bool', valor: c.memoria })
+        : campo({ ruta: `pers.cupones.${i}.tasa`, etiqueta: 'Cupón anual', tipo: 'pct', valor: c.tasa, sufijo: '%' }) +
+          (c.tipo === 'rango'
+            ? campo({ ruta: `pers.cupones.${i}.inf`, etiqueta: 'Límite inferior', tipo: 'pct', valor: c.inf, sufijo: '%' }) +
+              campo({ ruta: `pers.cupones.${i}.sup`, etiqueta: 'Límite superior', tipo: 'pct', valor: c.sup, sufijo: '%' })
+            : '')) +
+      `</div></div>`;
+  });
+  h += `</div>`;
+  // Autocancelación
+  const a = s.autocall;
+  h += `<div class="bloque-pers"><div class="titulo"><h3>Autocancelación</h3></div><div class="rejilla">` +
+    campo({ ruta: 'pers.autocall.activa', etiqueta: 'Es autocancelable', tipo: 'bool', valor: a.activa, estructural: true });
+  if (a.activa)
+    h += campo({ ruta: 'pers.autocall.barrera', etiqueta: 'Barrera', tipo: 'pct', valor: a.barrera, sufijo: '%' }) +
+      campo({ ruta: 'pers.autocall.escalon', etiqueta: 'Step-down por fecha', tipo: 'pct', valor: a.escalon, sufijo: '%' }) +
+      campo({ ruta: 'pers.autocall.desde', etiqueta: 'Primera fecha', tipo: 'ent', valor: a.desde }) +
+      campo({ ruta: 'pers.autocall.prima', etiqueta: 'Prima por periodo', tipo: 'pct', valor: a.prima, sufijo: '%' }) +
+      campo({ ruta: 'pers.autocall.acumulativa', etiqueta: 'Prima acumulada (Athena)', tipo: 'bool', valor: a.acumulativa });
+  h += `</div></div>`;
+  // Barreras
+  const ki = s.ki, ko = s.ko;
+  h += `<div class="bloque-pers"><div class="titulo"><h3>Barreras</h3></div><div class="rejilla">` +
+    campo({ ruta: 'pers.ki.activa', etiqueta: 'Barrera de capital', tipo: 'bool', valor: ki.activa, estructural: true });
+  if (ki.activa)
+    h += campo({ ruta: 'pers.ki.nivel', etiqueta: 'Nivel de la barrera de capital', tipo: 'pct', valor: ki.nivel, sufijo: '%' }) +
+      campo({ ruta: 'pers.ki.observacion', etiqueta: 'Observación', tipo: 'sel', valor: ki.observacion, opciones: OBSERVACIONES });
+  h += `</div><div class="rejilla">` +
+    campo({ ruta: 'pers.ko.activa', etiqueta: 'Barrera desactivante (al alza)', tipo: 'bool', valor: ko.activa, estructural: true });
+  if (ko.activa)
+    h += campo({ ruta: 'pers.ko.nivel', etiqueta: 'Nivel de la desactivante', tipo: 'pct', valor: ko.nivel, sufijo: '%' }) +
+      campo({ ruta: 'pers.ko.observacion', etiqueta: 'Observación', tipo: 'sel', valor: ko.observacion, opciones: OBSERVACIONES.slice(1) }) +
+      campo({ ruta: 'pers.ko.importe', etiqueta: 'Pago al desactivarse', tipo: 'pct', valor: ko.importe, sufijo: '%' }) +
+      campo({ ruta: 'pers.ko.pago', etiqueta: 'Momento del pago', tipo: 'sel', valor: ko.pago, opciones: [['vencimiento', 'A vencimiento'], ['inmediato', 'Inmediato']] });
+  h += `</div></div>`;
+  // Componentes del pago final
+  h += `<div class="bloque-pers"><div class="titulo"><h3>Pago a vencimiento</h3><button type="button" class="boton secundario pequeno" data-accion="anadir-bloque"${s.bloques.length >= 16 ? ' disabled' : ''}>Añadir componente</button></div>`;
+  if (!s.bloques.length) h += `<p class="nota">Sin componentes: a vencimiento no se paga nada.</p>`;
+  s.bloques.forEach((b, i) => {
+    const def = TIPOS_BLOQUE.find(t => t[0] === b.tipo) || TIPOS_BLOQUE[0];
+    h += `<div class="subyacente"><div class="titulo"><h3>Componente ${i + 1}</h3><button type="button" class="boton quitar pequeno" data-accion="quitar-bloque" data-i="${i}">Quitar</button></div><div class="rejilla">` +
+      campo({ ruta: `pers.bloques.${i}.tipo`, etiqueta: 'Tipo', tipo: 'sel', valor: b.tipo, estructural: true, opciones: TIPOS_BLOQUE.map(t => [t[0], t[1]]) }) +
+      def[2].map(k => campo({ ruta: `pers.bloques.${i}.${k}`, etiqueta: CAMPO_BLOQUE[k][0], tipo: OPCIONALES.has(k) ? 'pctopt' : 'pct', valor: b[k], sufijo: '%' })).join('') +
+      (s.ki.activa ? campo({ ruta: `pers.bloques.${i}.condicion`, etiqueta: 'Condición', tipo: 'sel', valor: b.condicion,
+                             opciones: [['siempre', 'Siempre'], ['barrera_tocada', 'Si se toca la barrera'], ['barrera_no_tocada', 'Si no se toca la barrera']] }) : '') +
+      `</div></div>`;
+  });
+  h += `</div>`;
+  $('#caracteristicas').innerHTML = h;
+}
+
+function renderSimulacion() {
+  const s = estado.simulacion;
+  $('#simulacion').innerHTML =
+    campo({ ruta: 'simulacion.metodo', etiqueta: 'Método', tipo: 'sel', valor: s.metodo,
+            opciones: [['auto', 'Automático'], ['mc', 'Monte Carlo'], ['qmc', 'Cuasi Monte Carlo (Sobol)']] }) +
+    campo({ ruta: 'simulacion.error', etiqueta: 'Error estándar objetivo', tipo: 'pct', valor: s.error, sufijo: '% nominal',
+            ayuda: 'precisión del precio; 0.05 = 0,05% del nominal' });
+}
+
+function renderTodo() {
+  renderPlantillas();
+  renderGeneral();
+  renderSubyacentes();
+  renderCaracteristicas();
+  renderSimulacion();
+  actualizar();
+}
+
+// ======================================================================
+// Lectura de los valores del estado
+// ======================================================================
+function fijar(ruta, valor) {
+  const partes = ruta.split('.');
+  let o = estado;
+  for (let i = 0; i < partes.length - 1; i++) o = o[partes[i]];
+  o[partes[partes.length - 1]] = valor;
+}
+function interpretarRespuestas(p) {
+  const r = {};
+  for (const q of p.preguntas) {
+    const v = estado.resp[q.k];
+    if (q.tipo === 'pct') r[q.k] = leerNumero(v);
+    else if (q.tipo === 'pctopt') r[q.k] = String(v ?? '').trim() === '' ? '' : leerNumero(v);
+    else if (q.tipo === 'entero') r[q.k] = leerNumero(v);
+    else r[q.k] = v;
+  }
+  return r;
+}
+
+// ======================================================================
+// Validación (las mismas reglas que comprueba `estructurados`)
+// ======================================================================
+function validar() {
+  const err = new Map(), avisos = [];
+  const fallo = (ruta, msg) => { if (!err.has(ruta)) err.set(ruta, msg); };
+  const numero = (ruta, v, mn, mx, abierto) => {
+    const x = leerNumero(v);
+    if (!Number.isFinite(x)) { fallo(ruta, 'Escriba un número.'); return NaN; }
+    if ((abierto ? !(x > mn) : !(x >= mn)) || x > mx) fallo(ruta, `Debe estar entre ${num(mn)} y ${num(mx)}${abierto ? ' (sin incluir ' + num(mn) + ')' : ''}.`);
+    return x;
+  };
+  const g = estado.general, p = plantilla(estado.plantilla);
+  if (!String(g.nombre).trim()) fallo('general.nombre', 'Póngale un nombre.');
+  if (!p.nominalEsSpot) numero('general.nominal', g.nominal, 0, 1e15, true);
+  const T = leerPlazo(g.vencimiento);
+  if (!Number.isFinite(T)) fallo('general.vencimiento', 'Escriba un plazo: 3A, 18M, 2A6M o un número de años.');
+  numero('general.tipo_interes', g.tipo_interes, -20, 100);
+
+  const nombres = new Set();
+  estado.subyacentes.forEach((s, i) => {
+    const base = `subyacentes.${i}.`;
+    const nom = String(s.nombre).trim();
+    if (!nom) fallo(base + 'nombre', 'Póngale un nombre.');
+    else if (nombres.has(nom)) fallo(base + 'nombre', 'Nombre repetido.');
+    else if (nom.includes('/')) fallo(base + 'nombre', 'El nombre no puede contener "/".');
+    nombres.add(nom);
+    numero(base + 'spot', s.spot, 0, 1e15, true);
+    if (String(s.nivel_inicial ?? '').trim() !== '') numero(base + 'nivel_inicial', s.nivel_inicial, 0, 1e15, true);
+    numero(base + 'dividendos', s.dividendos, -20, 100);
+    const m = modelo(s.modelo), v = {};
+    for (const d of m.params) v[d.k] = numero(base + 'params.' + d.k, s.params[d.k], d.min, d.max, d.abierto);
+    if (m.clave === 'nig' && [v.sigma, v.theta, v.kappa].every(Number.isFinite)) {
+      const sg = v.sigma / 100;
+      if (1 - sg * sg * v.kappa - 2 * v.theta * v.kappa <= 0)
+        fallo(base + 'params.kappa', 'Incompatible con σ y θ: hace falta 1 − σ²κ − 2θκ > 0.');
+    }
+  });
+
+  // Correlación: rango y matriz semidefinida positiva
+  const n = estado.subyacentes.length;
+  if (n > 1) {
+    const c = estado.correlacion, R = [];
+    for (let i = 0; i < n; i++) { R.push(new Array(n).fill(0)); R[i][i] = 1; }
+    if (c.modo === 'comun') {
+      const r = numero('correlacion.comun', c.comun, -100, 100);
+      for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) if (i !== j) R[i][j] = r / 100;
+    } else {
+      for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+        const r = numero(`correlacion.parejas.${i}-${j}`, valorPareja(i, j), -100, 100);
+        R[i][j] = R[j][i] = r / 100;
+      }
+    }
+    if (!choleskyValida(R)) fallo('correlacion.matriz', 'Estas correlaciones no forman una matriz válida (no es semidefinida positiva).');
+  }
+
+  // Características
+  let nobs = 1;
+  if (p.id === 'personalizado') {
+    const s = estado.pers;
+    nobs = Number.isFinite(T) ? Math.max(1, Math.ceil(T * frecuenciaPorAnio(s.frecuencia) - 1e-6)) : 1;
+    s.cupones.forEach((cu, i) => {
+      const b = `pers.cupones.${i}.`;
+      if (cu.tipo === 'condicional') { numero(b + 'importe', cu.importe, 0, 1000); numero(b + 'barrera', cu.barrera, 0, 100000, true); }
+      else numero(b + 'tasa', cu.tasa, 0, 1000);
+      if (cu.tipo === 'rango') {
+        const lo = numero(b + 'inf', cu.inf, 0, 100000), hi = numero(b + 'sup', cu.sup, 0, 100000);
+        if (Number.isFinite(lo) && Number.isFinite(hi) && !(hi > lo)) fallo(b + 'sup', 'Debe ser mayor que el límite inferior.');
+      }
+    });
+    if (s.autocall.activa) {
+      numero('pers.autocall.barrera', s.autocall.barrera, 0, 100000, true);
+      numero('pers.autocall.escalon', s.autocall.escalon, -100, 100);
+      const d = numero('pers.autocall.desde', s.autocall.desde, 1, Number.isFinite(T) ? nobs : 1e6);
+      if (Number.isFinite(d) && !Number.isInteger(d)) fallo('pers.autocall.desde', 'Escriba un número entero.');
+      numero('pers.autocall.prima', s.autocall.prima, 0, 1000);
+    }
+    if (s.ki.activa) numero('pers.ki.nivel', s.ki.nivel, 0, 100000, true);
+    if (s.ko.activa) { numero('pers.ko.nivel', s.ko.nivel, 0, 100000, true); numero('pers.ko.importe', s.ko.importe, 0, 100000); }
+    s.bloques.forEach((bl, i) => {
+      const def = TIPOS_BLOQUE.find(t => t[0] === bl.tipo) || TIPOS_BLOQUE[0];
+      for (const k of def[2]) {
+        const ruta = `pers.bloques.${i}.${k}`;
+        if (OPCIONALES.has(k) && String(bl[k] ?? '').trim() === '') continue;
+        const x = numero(ruta, bl[k], -100000, 100000);
+        if (k === 'strike' && bl.tipo === 'put_vendida' && Number.isFinite(x) && !(x > 0)) fallo(ruta, 'El strike debe ser positivo.');
+      }
+    });
+    if (!s.cupones.length && !s.autocall.activa && !s.ko.activa && !s.bloques.length) avisos.push('El producto no paga nada.');
+    if (s.ki.activa && !s.bloques.some(b => b.condicion !== 'siempre')) avisos.push('Ningún componente final depende de la barrera de capital.');
+  } else {
+    const r = interpretarRespuestas(p);
+    const f = p.preguntas.find(q => q.tipo === 'frec' && (!q.si || q.si(r)));
+    if (f && Number.isFinite(T)) nobs = Math.max(1, Math.ceil(T * frecuenciaPorAnio(r[f.k]) - 1e-6));
+    for (const q of p.preguntas) {
+      if (q.si && !q.si(r)) continue;
+      const ruta = 'resp.' + q.k;
+      if (q.tipo === 'pct') numero(ruta, estado.resp[q.k], q.min, q.max, q.abierto);
+      else if (q.tipo === 'pctopt' && String(estado.resp[q.k] ?? '').trim() !== '') numero(ruta, estado.resp[q.k], -100000, 100000);
+      else if (q.tipo === 'entero') {
+        // Sin vencimiento válido no se sabe cuántas fechas hay: solo se pide un entero >= 1
+        const x = numero(ruta, estado.resp[q.k], q.min ?? 1, Number.isFinite(T) ? nobs : 1e6);
+        if (Number.isFinite(x) && !Number.isInteger(x)) fallo(ruta, 'Escriba un número entero.');
+      }
+    }
+    if (p.id === 'range_accrual' && r.superior <= r.inferior) fallo('resp.superior', 'Debe ser mayor que el límite inferior.');
+    if (p.id === 'phoenix' && r.barrera_autocall < r.barrera_cupon) avisos.push('La barrera de autocancelación es menor que la de cupón.');
+  }
+  numero('simulacion.error', estado.simulacion.error, 0, 100, true);
+  return { err, avisos };
+}
+function choleskyValida(R) {
+  const n = R.length, L = R.map(f => f.map(() => 0));
+  for (let i = 0; i < n; i++) for (let j = 0; j <= i; j++) {
+    let s = R[i][j];
+    for (let k = 0; k < j; k++) s -= L[i][k] * L[j][k];
+    if (!Number.isFinite(s)) return true; // ya hay errores de número
+    if (i === j) { if (s < -1e-10) return false; L[i][i] = Math.sqrt(Math.max(s, 0)); }
+    else L[i][j] = L[j][j] > 1e-12 ? s / L[j][j] : 0;
+  }
+  return true;
+}
+
+// ======================================================================
+// Documento JSON (mismo formato que lee `estructurados`)
+// ======================================================================
+function construirDocumento() {
+  const p = plantilla(estado.plantilla), g = estado.general;
+  const doc = { formato: 'producto-estructurado/1', plantilla: p.id, nombre: String(g.nombre).trim() || p.titulo };
+  let secciones, descAuto = '';
+  if (p.id === 'personalizado') secciones = construirPersonalizado();
+  else { const r = interpretarRespuestas(p); secciones = p.construir(r); descAuto = p.describir(r); }
+  const desc = String(g.descripcion).trim() || descAuto;
+  if (desc) doc.descripcion = desc;
+  const subs = estado.subyacentes;
+  doc.nominal = p.nominalEsSpot ? leerNumero(subs[0].spot) : leerNumero(g.nominal);
+  doc.moneda = String(g.moneda).trim() || 'EUR';
+  const vt = String(g.vencimiento).trim(), vn = leerNumero(vt);
+  doc.vencimiento = Number.isFinite(vn) ? vn : vt;
+  doc.mercado = { tipo_interes: pct(leerNumero(g.tipo_interes)) };
+  doc.subyacentes = subs.map(s => {
+    const o = { nombre: String(s.nombre).trim(), spot: leerNumero(s.spot) };
+    const ni = leerNumero(s.nivel_inicial);
+    if (Number.isFinite(ni) && ni !== o.spot) o.nivel_inicial = ni;
+    o.dividendos = pct(leerNumero(s.dividendos));
+    const m = modelo(s.modelo), mo = { tipo: m.clave };
+    for (const d of m.params) { const x = leerNumero(s.params[d.k]); mo[d.k] = d.pct ? pct(x) : x; }
+    o.modelo = mo;
+    return o;
+  });
+  if (subs.length > 1) {
+    const c = estado.correlacion;
+    if (c.modo === 'comun') doc.correlacion = pct(leerNumero(c.comun));
+    else {
+      const o = {};
+      for (let i = 0; i < subs.length; i++) for (let j = i + 1; j < subs.length; j++)
+        o[`${String(subs[i].nombre).trim()}/${String(subs[j].nombre).trim()}`] = pct(leerNumero(valorPareja(i, j)));
+      doc.correlacion = o;
+    }
+    doc.cesta = estado.cesta;
+  }
+  Object.assign(doc, secciones);
+  doc.simulacion = { metodo: estado.simulacion.metodo, error_objetivo: pct(leerNumero(estado.simulacion.error)) };
+  doc._disenador = { version: 1, estado };
+  return doc;
+}
+
+function construirPersonalizado() {
+  const s = estado.pers, out = { observaciones: { frecuencia: s.frecuencia } };
+  const patas = s.cupones.map(c => {
+    if (c.tipo === 'condicional') return { tipo: 'condicional', importe: pct(leerNumero(c.importe)), barrera: pct(leerNumero(c.barrera)), memoria: !!c.memoria };
+    const o = { tipo: c.tipo, tasa_anual: pct(leerNumero(c.tasa)) };
+    if (c.tipo === 'rango') o.rango = [pct(leerNumero(c.inf)), pct(leerNumero(c.sup))];
+    return o;
+  });
+  if (patas.length === 1) out.cupones = patas[0];
+  else if (patas.length > 1) out.cupones = patas;
+  const a = s.autocall;
+  if (a.activa) {
+    const o = { barrera: pct(leerNumero(a.barrera)) };
+    const esc_ = leerNumero(a.escalon);
+    if (esc_) o.escalon = pct(esc_);
+    o.desde = leerNumero(a.desde);
+    const pr = leerNumero(a.prima);
+    if (pr) { o.prima = pct(pr); o.acumulativa = !!a.acumulativa; }
+    out.autocancelacion = o;
+  }
+  if (s.ki.activa) out.barrera_capital = { nivel: pct(leerNumero(s.ki.nivel)), observacion: s.ki.observacion };
+  if (s.ko.activa) out.barrera_desactivante = { nivel: pct(leerNumero(s.ko.nivel)), observacion: s.ko.observacion,
+                                                importe: pct(leerNumero(s.ko.importe)), pago: s.ko.pago };
+  const comp = s.bloques.map(b => {
+    const def = TIPOS_BLOQUE.find(t => t[0] === b.tipo) || TIPOS_BLOQUE[0], o = { tipo: b.tipo };
+    for (const k of def[2]) {
+      if (OPCIONALES.has(k) && String(b[k] ?? '').trim() === '') continue;
+      o[k] = pct(leerNumero(b[k]));
+    }
+    if (s.ki.activa && b.condicion && b.condicion !== 'siempre') o.condicion = b.condicion;
+    return o;
+  });
+  out.amortizacion_final = s.rendimiento === 'medio' ? { rendimiento: 'medio', componentes: comp } : comp;
+  return out;
+}
+
+// Escritura con el mismo estilo que el programa: listas cortas de escalares en
+// una línea; el estado del diseñador va compacto en una sola línea al final.
+function serializar(v, nivel = 0, clave = '') {
+  const pad = '  '.repeat(nivel + 1), padFin = '  '.repeat(nivel);
+  const escalar = x => x === null || typeof x !== 'object';
+  if (clave === '_disenador') return JSON.stringify(v);
+  if (Array.isArray(v)) {
+    if (!v.length) return '[]';
+    const enLinea = v.length <= 16 && v.every(x => escalar(x) || (Array.isArray(x) && x.length <= 16 && x.every(escalar)));
+    if (enLinea) return '[' + v.map(x => Array.isArray(x) ? '[' + x.map(y => JSON.stringify(y)).join(', ') + ']' : JSON.stringify(x)).join(', ') + ']';
+    return '[\n' + v.map(x => pad + serializar(x, nivel + 1)).join(',\n') + '\n' + padFin + ']';
+  }
+  if (v && typeof v === 'object') {
+    const k = Object.keys(v);
+    if (!k.length) return '{}';
+    return '{\n' + k.map(kk => pad + JSON.stringify(kk) + ': ' + serializar(v[kk], nivel + 1, kk)).join(',\n') + '\n' + padFin + '}';
+  }
+  if (typeof v === 'number' && !Number.isFinite(v)) return 'null';
+  return JSON.stringify(v);
+}
+
+// ======================================================================
+// Vista previa: calendario y perfil de pago a partir del propio JSON
+// ======================================================================
+const fr = x => typeof x === 'string' ? (x.trim().endsWith('%') ? leerNumero(x.trim().slice(0, -1)) / 100 : leerNumero(x)) : x;
+function vistaDe(doc) {
+  const T = typeof doc.vencimiento === 'number' ? doc.vencimiento : leerPlazo(doc.vencimiento);
+  if (!Number.isFinite(T) || T <= 0) return null;
+  const f = doc.observaciones ? frecuenciaPorAnio(doc.observaciones.frecuencia) : 0;
+  const fechas = [];
+  if (f > 0) { const nf = Math.ceil(T * f - 1e-6); for (let j = 1; j <= nf; j++) fechas.push(T - (nf - j) / f); }
+  else fechas.push(T);
+  const n = fechas.length;
+  const filas = fechas.map((t, j) => ({ t, etiqueta: etiquetaPlazo(t), ac: '', cup: [] }));
+  // autocancelación
+  const ac = doc.autocancelacion;
+  if (ac) {
+    const desde = ac.desde || 1, b0 = fr(ac.barrera), es = fr(ac.escalon || 0), prima = fr(ac.prima || 0), imp = fr(ac.importe ?? '100%');
+    for (let j = desde - 1; j < n; j++) {
+      const b = b0 + es * (j - (desde - 1)), pago = imp + prima * (ac.acumulativa ? j + 1 : 1);
+      filas[j].ac = `P ≥ ${pct(b * 100)} → ${pct(pago * 100)}`;
+    }
+  }
+  // cupones
+  const patas = doc.cupones ? (Array.isArray(doc.cupones) ? doc.cupones : [doc.cupones]) : [];
+  for (const c of patas) {
+    for (let j = 0; j < n; j++) {
+      const dt = filas[j].t - (j ? filas[j - 1].t : 0);
+      const imp = c.importe != null ? fr(c.importe) : fr(c.tasa_anual) * dt;
+      if (c.tipo === 'condicional') filas[j].cup.push(`${pct(imp * 100)} si P ≥ ${pct(fr(c.barrera) * 100)}${c.memoria ? ' (memoria)' : ''}`);
+      else if (c.tipo === 'rango') filas[j].cup.push(`${pct(Math.round(imp * 1e6) / 1e4)} × días en [${c.rango[0]}, ${c.rango[1]}]`);
+      else filas[j].cup.push(pct(Math.round(imp * 1e6) / 1e4));
+    }
+  }
+  const am = doc.amortizacion_final;
+  const comps = Array.isArray(am) ? am : (am ? am.componentes : []);
+  const bloques = comps.map(b => {
+    const o = { tipo: b.tipo, cond: b.condicion || 'siempre', importe: fr(b.importe ?? (b.tipo === 'fijo' ? '100%' : 0)),
+                part: fr(b.participacion ?? '100%'), strike: fr(b.strike ?? '100%'),
+                suelo: b.suelo != null ? fr(b.suelo) : (b.tipo === 'cliquet' ? fr(b.suelo_global ?? 0) : -Infinity),
+                techo: b.techo != null ? fr(b.techo) : (b.tipo === 'cliquet' && b.techo_global != null ? fr(b.techo_global) : Infinity) };
+    if (b.tipo === 'put_vendida') { o.tipo = 'put'; o.part = -o.part / o.strike; }
+    if (b.tipo === 'cliquet') { o.suelo = fr(b.suelo_global ?? 0); o.techo = b.techo_global != null ? fr(b.techo_global) : Infinity; }
+    return o;
+  });
+  const ki = doc.barrera_capital ? { nivel: fr(doc.barrera_capital.nivel), obs: doc.barrera_capital.observacion || 'vencimiento' } : null;
+  const ko = doc.barrera_desactivante ? { nivel: fr(doc.barrera_desactivante.nivel), importe: fr(doc.barrera_desactivante.importe ?? '100%') } : null;
+  return { T, filas, bloques, ki, ko, medio: !Array.isArray(am) && am && am.rendimiento === 'medio',
+           cliquet: bloques.some(b => b.tipo === 'cliquet'), conCupones: patas.length > 0, conAc: !!ac };
+}
+function amortizacion(bloques, P, tocada) {
+  let A = 0;
+  for (const b of bloques) {
+    if (b.cond === 'barrera_tocada' && !tocada) continue;
+    if (b.cond === 'barrera_no_tocada' && tocada) continue;
+    switch (b.tipo) {
+      case 'fijo': A += b.importe; break;
+      case 'lineal': A += b.part * Math.min(Math.max(P, b.suelo), b.techo); break;
+      case 'call': A += b.part * Math.max(Math.min(P, b.techo) - b.strike, 0); break;
+      case 'put': A += b.part * Math.max(b.strike - Math.max(P, b.suelo), 0); break;
+      case 'digital': if (P >= b.strike) A += b.importe; break;
+      case 'digital_put': if (P < b.strike) A += b.importe; break;
+      case 'cliquet': A += b.part * Math.min(Math.max(0, b.suelo), b.techo); break;
+    }
+  }
+  return A;
+}
+
+function dibujarPerfil(v) {
+  const caja = $('#perfil');
+  if (!v || !v.bloques.length) { caja.innerHTML = '<p class="nota">Sin pago a vencimiento.</p>'; $('#leyenda').innerHTML = ''; $('#nota-perfil').textContent = ''; return; }
+  const W = 560, H = 300, m = { l: 52, r: 16, t: 14, b: 40 };
+  const xMax = Math.max(1.6, v.ko ? v.ko.nivel + 0.2 : 0);
+  const dos = !!v.ki, tol = 1e-9;
+  const series = [{ tocada: false, color: 'var(--acento)', nombre: dos ? 'Sin tocar la barrera' : 'Amortización' }];
+  if (dos) series.push({ tocada: true, color: 'var(--tocada)', nombre: 'Barrera tocada' });
+  const posible = (P, tocada) => {
+    if (v.ko && P >= v.ko.nivel - tol) return false;
+    if (dos && !tocada && P <= v.ki.nivel + tol) return false;
+    if (dos && tocada && P > v.ki.nivel + tol && v.ki.obs === 'vencimiento') return false;
+    return true;
+  };
+  const N = 640, puntos = series.map(() => []);
+  let yMax = 1.2;
+  for (let i = 0; i <= N; i++) {
+    const P = xMax * i / N;
+    series.forEach((s, k) => {
+      if (!posible(P, s.tocada)) { puntos[k].push(null); return; }
+      const A = amortizacion(v.bloques, P, s.tocada);
+      puntos[k].push([P, A]);
+      yMax = Math.max(yMax, A);
+    });
+  }
+  if (v.ko) yMax = Math.max(yMax, v.ko.importe);
+  yMax = Math.ceil((yMax + 0.0001) / 0.2) * 0.2;
+  const yMin = 0;
+  const X = P => m.l + (W - m.l - m.r) * P / xMax;
+  const Y = A => H - m.b - (H - m.t - m.b) * (A - yMin) / (yMax - yMin);
+  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Pago a vencimiento en función del rendimiento final P">`;
+  s += `<rect x="${m.l}" y="${m.t}" width="${W - m.l - m.r}" height="${H - m.t - m.b}" fill="var(--hoja)" stroke="var(--regla)"/>`;
+  const pasoX = xMax > 2 ? 0.4 : 0.2;
+  for (let P = 0; P <= xMax + 1e-9; P += pasoX) {
+    s += `<line x1="${X(P)}" x2="${X(P)}" y1="${m.t}" y2="${H - m.b}" stroke="var(--cuadricula)"/>`;
+    s += `<text x="${X(P)}" y="${H - m.b + 16}" text-anchor="middle" font-size="11" fill="var(--tinta-2)" font-family="var(--fuente-datos)">${Math.round(P * 100)}%</text>`;
+  }
+  for (let A = 0; A <= yMax + 1e-9; A += 0.2) {
+    s += `<line x1="${m.l}" x2="${W - m.r}" y1="${Y(A)}" y2="${Y(A)}" stroke="var(--cuadricula)"/>`;
+    s += `<text x="${m.l - 6}" y="${Y(A) + 4}" text-anchor="end" font-size="11" fill="var(--tinta-2)" font-family="var(--fuente-datos)">${Math.round(A * 100)}%</text>`;
+  }
+  // nominal (100%) de referencia
+  s += `<line x1="${m.l}" x2="${W - m.r}" y1="${Y(1)}" y2="${Y(1)}" stroke="var(--tinta-2)" stroke-dasharray="2 4" stroke-width="1"/>`;
+  // barreras
+  const marca = (P, txt, color) => {
+    if (P < 0 || P > xMax) return '';
+    return `<line x1="${X(P)}" x2="${X(P)}" y1="${m.t}" y2="${H - m.b}" stroke="${color}" stroke-dasharray="5 4" stroke-width="1.2"/>` +
+      `<text x="${X(P) + 4}" y="${m.t + 12}" font-size="11" fill="${color}" font-family="var(--fuente-texto)">${esc(txt)}</text>`;
+  };
+  if (v.ki) s += marca(v.ki.nivel, 'Barrera ' + Math.round(v.ki.nivel * 1000) / 10 + '%', 'var(--tocada)');
+  if (v.ko) {
+    s += `<rect x="${X(v.ko.nivel)}" y="${m.t}" width="${W - m.r - X(v.ko.nivel)}" height="${H - m.t - m.b}" fill="var(--cuadricula)" opacity="0.6"/>`;
+    s += `<line x1="${X(v.ko.nivel)}" x2="${W - m.r}" y1="${Y(v.ko.importe)}" y2="${Y(v.ko.importe)}" stroke="var(--acento)" stroke-width="2.2" stroke-dasharray="1 5" stroke-linecap="round"/>`;
+    s += marca(v.ko.nivel, 'Desactivante ' + Math.round(v.ko.nivel * 1000) / 10 + '%', 'var(--tinta-2)');
+  }
+  // series
+  series.forEach((ser, k) => {
+    let d = '', abierto = false;
+    for (const pt of puntos[k]) {
+      if (!pt) { abierto = false; continue; }
+      d += (abierto ? 'L' : 'M') + X(pt[0]).toFixed(1) + ' ' + Y(Math.max(pt[1], yMin)).toFixed(1) + ' ';
+      abierto = true;
+    }
+    if (d) s += `<path d="${d}" fill="none" stroke="${ser.color}" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/>`;
+  });
+  s += `<text x="${m.l + (W - m.l - m.r) / 2}" y="${H - 6}" text-anchor="middle" font-size="11.5" fill="var(--tinta-2)" font-family="var(--fuente-texto)">${v.medio ? 'P medio de las fechas' : 'P final'} (rendimiento de la cesta)</text>`;
+  s += `</svg>`;
+  caja.innerHTML = s;
+  $('#leyenda').innerHTML = series.map(x => `<span><i style="background:${x.color}"></i>${esc(x.nombre)}</span>`).join('') +
+    (v.ko ? `<span><i style="background:var(--regla)"></i>Zona desactivada: paga ${pct(Math.round(v.ko.importe * 1e4) / 100)}</span>` : '');
+  const notas = ['En % del nominal, sin cupones.'];
+  if (v.cliquet) notas.push('El cliquet se dibuja con suma de rendimientos nula.');
+  if (dos) notas.push('Solo se dibujan los escenarios posibles con esa forma de observación.');
+  $('#nota-perfil').textContent = notas.join(' ');
+}
+
+function dibujarCalendario(v) {
+  const caja = $('#calendario');
+  if (!v) { caja.innerHTML = '<p class="nota" style="padding:8px">Indique un vencimiento válido.</p>'; return; }
+  let h = '<table><thead><tr><th>#</th><th>Fecha</th>' + (v.conAc ? '<th>Autocancelación</th>' : '') + (v.conCupones ? '<th>Cupón</th>' : '') + '</tr></thead><tbody>';
+  v.filas.forEach((f, j) => {
+    h += `<tr><td class="num">${j + 1}</td><td class="num">${esc(f.etiqueta)}</td>` +
+      (v.conAc ? `<td class="num">${esc(f.ac || '—')}</td>` : '') +
+      (v.conCupones ? `<td>${esc(f.cup.join(' + ') || '—')}</td>` : '') + `</tr>`;
+  });
+  h += '</tbody></table>';
+  caja.innerHTML = h;
+}
+
+function dibujarResumen(doc, v) {
+  const subs = doc.subyacentes || [];
+  const nombreCesta = { peor: 'el peor (worst-of)', mejor: 'el mejor (best-of)', media: 'media equiponderada' }[doc.cesta] || 'un subyacente';
+  const filas = [
+    ['Producto', esc(doc.nombre)],
+    ['Nominal', `${esc(num(doc.nominal))} ${esc(doc.moneda)}`],
+    ['Vencimiento', v ? `${esc(String(doc.vencimiento))} (${num(Math.round(v.T * 1e4) / 1e4)} años)` : esc(String(doc.vencimiento))],
+    ['Subyacentes', subs.map(s => `${esc(s.nombre)} · ${esc(modelo(s.modelo.tipo).nombre)}`).join('<br>')],
+    ['Cesta', subs.length > 1 ? esc(nombreCesta) : 'un subyacente'],
+  ];
+  if (v && v.ki) filas.push(['Barrera de capital', `${pct(Math.round(v.ki.nivel * 1e4) / 100)} · ${esc(v.ki.obs)}`]);
+  if (v && v.ko) filas.push(['Desactivante', `${pct(Math.round(v.ko.nivel * 1e4) / 100)}`]);
+  $('#resumen').innerHTML = filas.map(([a, b]) => `<dt>${a}</dt><dd>${b}</dd>`).join('');
+}
+
+// ======================================================================
+// Ciclo de actualización
+// ======================================================================
+let docActual = null;
+function actualizar() {
+  const { err, avisos } = validar();
+  errores = err;
+  document.querySelectorAll('[data-fallo]').forEach(e => { e.textContent = err.get(e.dataset.fallo) || ''; });
+  document.querySelectorAll('[data-campo]').forEach(e => e.classList.toggle('mal', err.has(e.dataset.campo)));
+  document.querySelectorAll('#correlacion input[data-ruta]').forEach(e => e.closest('td')?.classList.toggle('mal', err.has(e.dataset.ruta)));
+  const est = $('#estado');
+  if (err.size) {
+    est.innerHTML = `<span class="chip mal">${err.size} ${err.size === 1 ? 'dato por corregir' : 'datos por corregir'}</span>` +
+      `<ul>${[...err.entries()].slice(0, 5).map(([r, m]) => `<li>${esc(etiquetaDe(r))}: ${esc(m)}</li>`).join('')}</ul>`;
+  } else {
+    est.innerHTML = `<span class="chip ok">Producto completo</span>` +
+      (avisos.length ? `<ul class="avisos">${avisos.map(a => `<li>${esc(a)}</li>`).join('')}</ul>` : '');
+  }
+  $('#guardar').disabled = err.size > 0;
+  docActual = construirDocumento();
+  const v = err.size ? null : vistaDe(docActual);
+  dibujarResumen(docActual, v || vistaDe(docActual));
+  dibujarPerfil(v);
+  dibujarCalendario(v || vistaDe(docActual));
+  $('#json').textContent = serializar(docActual) + '\n';
+}
+function etiquetaDe(ruta) {
+  const e = document.querySelector(`[data-campo="${CSS.escape(ruta)}"] label`);
+  if (e) {
+    const sub = ruta.match(/^subyacentes\.(\d+)\./);
+    return (sub ? `Subyacente ${+sub[1] + 1} · ` : '') + e.textContent;
+  }
+  if (ruta === 'correlacion.matriz') return 'Correlación';
+  if (ruta.startsWith('correlacion.parejas')) return 'Correlación por parejas';
+  return ruta;
+}
+
+// ======================================================================
+// Eventos
+// ======================================================================
+const form = $('#formulario');
+form.addEventListener('submit', e => e.preventDefault());
+form.addEventListener('input', e => {
+  const t = e.target;
+  if (!t.dataset || !t.dataset.ruta) return;
+  if (t.dataset.estructural) return; // se trata en 'change'
+  const valor = t.type === 'checkbox' ? t.checked : t.value;
+  fijar(t.dataset.ruta, valor);
+  if (t.dataset.ruta.startsWith('subyacentes.')) estado.subyacentesTocados = true;
+  const par = t.dataset.ruta.match(/^correlacion\.parejas\.(\d+-\d+)$/);
+  if (par) { const e = document.getElementById('espejo-' + par[1]); if (e) e.textContent = valor + '%'; }
+  if (/^subyacentes\.\d+\.nombre$/.test(t.dataset.ruta) && estado.correlacion.modo === 'parejas') {
+    // refrescar los encabezados de la matriz sin perder el foco del campo de nombre
+    const pos = t.selectionStart;
+    renderCorrelacion();
+    t.focus(); try { t.setSelectionRange(pos, pos); } catch (_) {}
+  }
+  actualizar();
+});
+form.addEventListener('change', e => {
+  const t = e.target;
+  if (t.name === 'plantilla') { cambiarPlantilla(t.value); return; }
+  if (t.name === 'modo-corr') { estado.correlacion.modo = t.value; renderCorrelacion(); actualizar(); return; }
+  if (!t.dataset || !t.dataset.ruta) return;
+  const valor = t.type === 'checkbox' ? t.checked : t.value;
+  fijar(t.dataset.ruta, valor);
+  const m = t.dataset.ruta.match(/^subyacentes\.(\d+)\.modelo$/);
+  if (m) {
+    const s = estado.subyacentes[+m[1]];
+    const volAnterior = leerNumero(s.params.volatilidad ?? s.params.vol_inicial ?? s.params.sigma0 ?? s.params.alpha ?? s.params.sigma);
+    s.params = paramsPorDefecto(valor, Number.isFinite(volAnterior) ? volAnterior : null);
+    estado.subyacentesTocados = true;
+    renderSubyacentes(); actualizar();
+    $(`#c-subyacentes-${m[1]}-modelo`)?.focus();
+    return;
+  }
+  if (t.dataset.estructural) {
+    const id = t.id;
+    if (t.dataset.ruta.startsWith('pers.')) renderPersonalizado(); else renderCaracteristicas();
+    actualizar();
+    document.getElementById(id)?.focus();
+    return;
+  }
+  actualizar();
+});
+form.addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  const s = estado.pers;
+  if (b.dataset.quitarSubyacente != null) {
+    estado.subyacentes.splice(+b.dataset.quitarSubyacente, 1);
+    estado.correlacion.parejas = {};
+    estado.subyacentesTocados = true;
+    renderSubyacentes(); actualizar(); return;
+  }
+  switch (b.dataset.accion) {
+    case 'anadir-cupon': s.cupones.push({ tipo: 'fijo', importe: 1, tasa: 4, barrera: 80, memoria: false, inf: 90, sup: 110 }); break;
+    case 'quitar-cupon': s.cupones.splice(+b.dataset.i, 1); break;
+    case 'anadir-bloque': s.bloques.push({ tipo: 'call', strike: 100, participacion: 100, techo: '', condicion: 'siempre' }); break;
+    case 'quitar-bloque': s.bloques.splice(+b.dataset.i, 1); break;
+    default: return;
+  }
+  renderPersonalizado(); actualizar();
+});
+$('#anadir-subyacente').addEventListener('click', () => {
+  const n = estado.subyacentes.length;
+  if (n >= 16) return;
+  estado.subyacentes.push({ nombre: 'S' + (n + 1), spot: 100, nivel_inicial: '', dividendos: 0, modelo: 'black_scholes',
+                            params: paramsPorDefecto('black_scholes', 20) });
+  estado.subyacentesTocados = true;
+  renderSubyacentes(); actualizar();
+  $(`#c-subyacentes-${n}-nombre`)?.focus();
+});
+// Los campos de bloques y patas guardan valores por defecto al cambiar de tipo
+form.addEventListener('change', e => {
+  const m = (e.target.dataset?.ruta || '').match(/^pers\.bloques\.(\d+)\.tipo$/);
+  if (!m) return;
+  const b = estado.pers.bloques[+m[1]];
+  for (const [k, [, def]] of Object.entries(CAMPO_BLOQUE)) if (b[k] === undefined) b[k] = def;
+}, true);
+
+function cambiarPlantilla(id) {
+  const p = plantilla(id), g = estado.general, anterior = plantilla(estado.plantilla);
+  estado.plantilla = p.id;
+  estado.resp = respuestasDe(p);
+  if (!g.nombre || g.nombre === anterior.titulo) g.nombre = p.titulo;
+  if (!estado.subyacentesTocados || p.nominalEsSpot || anterior.nominalEsSpot) {
+    estado.subyacentes = p.nominalEsSpot ? subyacentesDe(p) : (estado.subyacentesTocados ? estado.subyacentes : subyacentesDe(p));
+    if (p.nominalEsSpot) estado.subyacentes = estado.subyacentes.slice(0, 1);
+  }
+  g.vencimiento = p.venc;
+  if (p.nominalEsSpot) g.nominal = estado.subyacentes[0].spot;
+  else if (anterior.nominalEsSpot) g.nominal = 1000;
+  renderTodo();
+}
+
+// ---------------- Guardar, copiar, abrir ----------------
+const aviso = (txt, tipo) => { const e = $('#aviso-accion'); e.textContent = txt; e.className = 'aviso-accion ' + (tipo || ''); };
+const textoJSON = () => serializar(docActual) + '\n';
+let descargas = null;
+if (window.claude && typeof window.claude.use === 'function') {
+  // Dentro del visor de Claude: guardar con la confirmación del visor
+  $('#guardar').hidden = true;
+  window.claude.use('downloads').then(d => { descargas = d; $('#guardar').hidden = !d; }).catch(() => {});
+}
+$('#guardar').addEventListener('click', async () => {
+  if (errores.size) return;
+  const nombre = nombreFichero(docActual.nombre);
+  if (descargas) {
+    try { await descargas.save({ filename: nombre, data: textoJSON() }); aviso('Guardado como ' + nombre + '.', 'ok'); }
+    catch (e) {
+      if (e && e.code === 'declined') aviso('No se ha guardado.', '');
+      else if (e && e.code === 'rate_limited') aviso('Ya hay una confirmación abierta; inténtelo de nuevo en un momento.', 'mal');
+      else { aviso('No se puede guardar aquí; use Copiar.', 'mal'); $('#guardar').hidden = true; }
+    }
+    return;
+  }
+  const url = URL.createObjectURL(new Blob([textoJSON()], { type: 'application/json' }));
+  const a = document.createElement('a');
+  a.href = url; a.download = nombre;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+  aviso('Descargado ' + nombre + '. Valórelo con: estructurados valorar ' + nombre, 'ok');
+});
+$('#copiar').addEventListener('click', () => {
+  const texto = textoJSON();
+  const seleccionar = () => {
+    const r = document.createRange(); r.selectNodeContents($('#json'));
+    const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+    aviso('Texto seleccionado: cópielo con Ctrl+C o ⌘C.', '');
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText)
+    navigator.clipboard.writeText(texto).then(() => aviso('JSON copiado al portapapeles.', 'ok'), seleccionar);
+  else seleccionar();
+});
+function quitarComentarios(t) {
+  let out = '', i = 0, enCadena = false;
+  while (i < t.length) {
+    const c = t[i];
+    if (enCadena) { out += c; if (c === '\\') { out += t[i + 1] ?? ''; i += 2; continue; } if (c === '"') enCadena = false; i++; continue; }
+    if (c === '"') { enCadena = true; out += c; i++; continue; }
+    if (c === '/' && t[i + 1] === '/') { while (i < t.length && t[i] !== '\n') i++; continue; }
+    if (c === '/' && t[i + 1] === '*') { i += 2; while (i < t.length && !(t[i] === '*' && t[i + 1] === '/')) i++; i += 2; continue; }
+    out += c; i++;
+  }
+  return out.replace(/,(\s*[}\]])/g, '$1');
+}
+$('#importar').addEventListener('change', e => {
+  const f = e.target.files && e.target.files[0];
+  if (!f) return;
+  const lector = new FileReader();
+  lector.onload = () => {
+    try {
+      const doc = JSON.parse(quitarComentarios(String(lector.result)));
+      const guardado = doc && doc._disenador && doc._disenador.estado;
+      if (!guardado || !guardado.plantilla) {
+        aviso('Este fichero no se creó con el diseñador: ábralo con un editor de texto o compruébelo con «estructurados mostrar».', 'mal');
+        return;
+      }
+      estado = Object.assign(estadoInicial(guardado.plantilla), guardado);
+      renderTodo();
+      aviso('Abierto ' + f.name + '.', 'ok');
+    } catch (err) {
+      aviso('No es un JSON válido: ' + err.message, 'mal');
+    } finally { e.target.value = ''; }
+  };
+  lector.readAsText(f);
+});
+
+renderTodo();
+})();
+</script>
+</body>
+</html>

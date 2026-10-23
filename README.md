@@ -72,6 +72,8 @@ Los cuatro modelos nuevos funcionan con los cuatro métodos (MC, QMC, MLMC, MLQM
 }
 ```
 
+**Diseñador visual.** [`herramientas/disenador_productos.html`](herramientas/disenador_productos.html) es un formulario en un único fichero HTML (se abre con doble clic, funciona sin conexión y sin instalar nada): se elige la plantilla, se rellenan los datos con ayudas y validación al momento, se ven en vivo la ficha, el calendario y el perfil de pago, y se guarda el JSON listo para `estructurados valorar`. El fichero guardado recuerda el estado del formulario (clave `_disenador`, que el programa ignora), así que puede volver a abrirse en el diseñador para retocarlo.
+
 **Facilidad de uso.** El asistente (`estructurados nuevo`) ofrece las plantillas habituales (o la construcción pieza a pieza), propone valores por defecto, explica cada dato con `?`, valida cada respuesta al momento (rangos, matriz de correlación válida, parámetros compatibles) y, antes de guardar, muestra la ficha: calendario con barreras y cupones por fecha, y el perfil de pago a vencimiento con y sin barrera tocada. Al leer un fichero, los errores indican la clave y la línea, y las erratas en las claves se avisan con una sugerencia («¿quería decir "observacion"?»).
 
 **Modelos por subyacente.** `black_scholes`, `heston`, `merton`, `bates`, `vol_local` (paramétrica tipo Dupire/CEV), `sabr` y `nig`; cada subyacente puede llevar uno distinto y la correlación se aplica a sus brownianos principales (`estructurados modelos` lista los parámetros).
@@ -99,6 +101,7 @@ Sin `nvcc` (o con `-DMC_USAR_CUDA=OFF`) se compila igualmente la parte CPU: el p
 - `hd_comun.hpp` / `modelos_hd.hpp`: código compartido CPU/GPU — Philox4x32-10, Sobol con scrambling de Hong-Hickernell, inversa de la normal y los pasos de los siete modelos de subyacente.
 - `referencias.hpp` / `referencias.cpp`: precios de referencia (Black-Scholes con dividendos, digitales y barreras, Merton, Fourier para Heston/Bates/NIG, Hagan para SABR, normal bivariante).
 - `estructurados/`: módulo de productos estructurados — lectura/escritura JSON (`json.*`), definición y validación (`producto.*`), ficha (`ficha.cpp`), plantillas y asistente (`plantillas.*`, `asistente.*`), núcleo de simulación (`simulacion_hd.hpp`, `plan.hpp`), motores CPU y GPU (`motor_cpu.cpp`, `motor_gpu.cu`), valoración y griegas (`valoracion.*`), programa `estructurados` (`main.cpp`) y la referencia del formato (`FORMATO.md`).
+- `herramientas/disenador_productos.html`: diseñador visual de productos (HTML autocontenido) que genera el JSON.
 - `productos/`: productos de ejemplo en JSON (Phoenix, Athena, reverse convertible, capital protegido, bonus, twin-win, shark fin, range accrual, cliquet, opción europea y un autocallable vivo con fechas reales).
 - `examples/`: 15 ejemplos ejecutables (`ejemplo01`…`ejemplo15`) que cubren europea, asiática, lookback, barrera, Heston, Dupire, cestas correlacionadas/no correlacionadas, variables de control, importance sampling, Merton, Bates, SABR y NIG.
 - `tests/`: tests del módulo de productos estructurados.
